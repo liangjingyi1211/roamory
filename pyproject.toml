@@ -1,0 +1,13 @@
+[project]
+name = "travelmind-starter"
+version = "0.1.0"
+description = "Local ADK travel planning multi-agent starter"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+  "google-adk>=1.0,<3",
+  "streamlit>=1.35,<2",
+  "python-dotenv>=1,<2",
+  "pydantic>=2,<3",
+]
+[dependency-groups]
+dev = ["pytest>=8,<10"]
