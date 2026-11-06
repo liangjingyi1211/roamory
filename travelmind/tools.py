@@ -1,86 +1,41 @@
-"""Demo catalog tools. No live booking, inventory or price API is used."""
+"""Deterministic date and cost calculations; no budget or demo catalog."""
 from datetime import date
-
-CATALOG = {
-    "Tokyo": {
-        "flights": [{"name": "Sample economy flight", "estimated_sgd": 520, "note": "DEMO ESTIMATE; not a live quote"}],
-        "hotels": [{"name": "Sample Ueno budget hotel", "estimated_sgd_per_night": 95, "note": "DEMO ESTIMATE"}, {"name": "Sample central hotel", "estimated_sgd_per_night": 150, "note": "DEMO ESTIMATE"}],
-        "activities": [{"name": "Ueno Park", "estimated_sgd": 0}, {"name": "Akihabara exploration", "estimated_sgd": 25}, {"name": "Museum visit", "estimated_sgd": 20}],
-    },
-    "Kyoto": {
-        "flights": [{"name": "Sample economy flight to Kansai area", "estimated_sgd": 560, "note": "DEMO ESTIMATE"}],
-        "hotels": [{"name": "Sample Kyoto hotel", "estimated_sgd_per_night": 100, "note": "DEMO ESTIMATE"}],
-        "activities": [{"name": "Fushimi Inari walk", "estimated_sgd": 0}, {"name": "Arashiyama walk", "estimated_sgd": 0}],
-    },
-    "Singapore": {
-        "flights": [{"name": "Local trip: no flight required", "estimated_sgd": 0, "note": "DEMO"}],
-        "hotels": [{"name": "Sample local hotel", "estimated_sgd_per_night": 130, "note": "DEMO ESTIMATE"}],
-        "activities": [{"name": "Gardens by the Bay outdoor gardens", "estimated_sgd": 0}, {"name": "Museum visit", "estimated_sgd": 25}],
-    },
-}
-
-
-def search_flights(destination: str, origin: str = "Singapore") -> dict:
-    """Find illustrative flight options in a small demo catalog; NOT live prices or availability.
-
-    Args:
-        destination: Destination city (Tokyo, Kyoto, or Singapore).
-        origin: Departure city.
-    """
-    rows = CATALOG.get(destination.strip().title(), {}).get("flights", [])
-    return {"origin": origin, "destination": destination, "options": rows, "data_source": "demo_catalog", "live": False}
-
-
-def search_hotels(destination: str, nights: int = 3) -> dict:
-    """Return example hotel choices and computed estimated total costs; NOT live offers.
-
-    Args:
-        destination: Destination city (Tokyo, Kyoto, or Singapore).
-        nights: Number of nights (1 through 30).
-    """
-    if not 1 <= nights <= 30:
-        return {"error": "nights must be between 1 and 30"}
-    rows = CATALOG.get(destination.strip().title(), {}).get("hotels", [])
-    return {"destination": destination, "nights": nights, "options": [{**x, "estimated_total_sgd": x["estimated_sgd_per_night"] * nights} for x in rows], "data_source": "demo_catalog", "live": False}
-
-
-def search_activities(destination: str) -> dict:
-    """Return illustrative activities from a demo catalog; opening hours are not verified.
-
-    Args:
-        destination: Destination city (Tokyo, Kyoto, or Singapore).
-    """
-    return {"destination": destination, "options": CATALOG.get(destination.strip().title(), {}).get("activities", []), "data_source": "demo_catalog", "live": False}
-
-
-def calculate_budget(flights_sgd: float, hotels_sgd: float, activities_sgd: float, transport_sgd: float, budget_sgd: float) -> dict:
-    """Calculate travel costs deterministically and determine whether they fit the budget.
-
-    Args:
-        flights_sgd: Estimated total flight cost in Singapore dollars.
-        hotels_sgd: Estimated total hotel cost in Singapore dollars.
-        activities_sgd: Estimated total activity cost in Singapore dollars.
-        transport_sgd: Estimated additional local or intercity transport cost in Singapore dollars.
-        budget_sgd: User's maximum total budget in Singapore dollars.
-    """
-    values = [flights_sgd, hotels_sgd, activities_sgd, transport_sgd, budget_sgd]
-    if any(x < 0 for x in values):
-        return {"error": "Costs and budget must be non-negative"}
-    total = sum(values[:4])
-    return {"currency": "SGD", "estimated_total": round(total, 2), "budget": budget_sgd, "remaining": round(budget_sgd - total, 2), "within_budget": total <= budget_sgd}
-
+from decimal import Decimal
+from .models import CostCategoryEstimate, CostEstimate, TripPlan
 
 def count_nights(start_date: str, end_date: str) -> dict:
-    """Return the number of nights between two ISO dates (YYYY-MM-DD).
-
-    Args:
-        start_date: Arrival date YYYY-MM-DD.
-        end_date: Departure date YYYY-MM-DD.
-    """
     try:
-        n = (date.fromisoformat(end_date) - date.fromisoformat(start_date)).days
+        nights = (date.fromisoformat(end_date) - date.fromisoformat(start_date)).days
     except ValueError:
-        return {"error": "Invalid date: use YYYY-MM-DD"}
-    if n < 1 or n > 30:
-        return {"error": "Trip length must be 1-30 nights"}
-    return {"nights": n}
+        return {"error": "日期必须为 YYYY-MM-DD"}
+    return {"nights": nights} if nights >= 0 else {"error": "结束日期不能早于开始日期"}
+
+def estimate_cost(plan: TripPlan) -> CostEstimate:
+    categories, missing = [], []
+    groups = {
+        "food": [(None, None) for d in plan.days for _ in (d.breakfast, d.lunch, d.dinner)],
+        "activities": [(a.ticket_price, a.currency) for d in plan.days for a in d.activities],
+        "hotel": [(d.hotel.price_per_night, d.hotel.currency) if d.hotel else (None, None)
+                  for i, d in enumerate(plan.days) if d.hotel is not None or i < len(plan.days) - 1],
+        "local_transport": [(None, None)],
+    }
+    for category, items in groups.items():
+        known = [(v, c) for v, c in items if v is not None and c]
+        currencies = {c for _, c in known}
+        complete = bool(items) and len(known) == len(items) and len(currencies) == 1
+        if not complete:
+            missing.append(f"{category}：价格、安排或统一币种信息不足")
+        for currency in sorted(currencies):
+            total = float(sum((Decimal(str(v)) for v, c in known if c == currency), Decimal(0)))
+            categories.append(CostCategoryEstimate(category=category, low=total, high=total,
+                currency=currency, basis="当前条目中已提供的参考金额，非实时报价",
+                coverage_note="已知项目小计，不包括未安排或缺价项目"))
+        if not known:
+            categories.append(CostCategoryEstimate(category=category,
+                basis="地点价格等级不等于金额，未推断价格", coverage_note="没有可信价格，不能按 0 计算"))
+    currencies = {c.currency for c in categories if c.low is not None}
+    complete = not missing and len(currencies) == 1
+    total = float(sum((Decimal(str(c.low)) for c in categories if c.low is not None), Decimal(0))) if complete else None
+    return CostEstimate(low=total, high=total, currency=next(iter(currencies)) if complete else None,
+        is_complete=complete, categories=categories, missing_information=missing,
+        note="总费用暂无法估算（价格信息不足）；类别金额仅为已知项目小计。机票不包含在内。" if not complete else "不含机票的参考费用。")
