@@ -3,9 +3,19 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>TravelMind daily workspace</title>
+<link rel="stylesheet" href="theme.css">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<a class="skip-link" href="#timeline">跳转到当天时间线</a>
+<div class="app-shell">
+  <aside class="geo-column" aria-label="当天地点地图与详情">
+    <section class="map-panel" aria-label="当天地点地图"><div id="map-status" role="status"></div><div id="map" aria-label="Google Maps 当天地点地图"></div></section>
+    <section class="place-panel" aria-label="选中地点详情"><span id="place-kind" hidden></span><div id="place-detail" aria-live="polite"><div class="place-empty">选择行程中的地点查看详情</div></div></section>
+  </aside>
+  <main class="journey-content" id="journey-content" aria-label="旅程日历与每日时间线" tabindex="-1">
+  <nav class="days" aria-label="每日行程"><div class="eyebrow">旅程日历</div><div id="days"></div></nav>
+      <section class="schedule" aria-label="当天行程"><div id="feedback" role="status" aria-live="polite"></div><div id="warnings"></div><div id="timeline" tabindex="-1"></div><div id="additions"></div><div id="notes"></div></section>
 <section class="assistant" aria-label="AI 行程助手">
   <div class="assistant-head"><div><strong>AI 行程助手</strong><span id="chat-context"></span></div><span class="chat-hint">替换 · 增加 · 单日重新规划</span></div>
   <details class="chat-history"><summary>对话记录 <span id="chat-count"></span></summary><div id="chat-messages" role="log" aria-live="polite"></div></details>
@@ -13,16 +23,7 @@
   <div id="chat-status" role="status" aria-live="polite"></div><button id="chat-retry" type="button" hidden>重试上次请求</button>
   <p class="assistant-foot">仅修改当前旅程 · 删除和改时间请用卡片按钮 · 对话记录不写入数据库</p>
 </section>
-<main class="workspace">
-  <nav class="days" aria-label="每日行程"><div class="eyebrow">YOUR JOURNEY</div><div id="days"></div></nav>
-  <section class="detail">
-    <header><div><div class="eyebrow" id="date-label"></div><h1 id="day-title"></h1></div><span class="pill">每日时间线</span></header>
-    <div class="detail-grid">
-      <section class="schedule" aria-label="当天时间线"><div class="disclaimer">当地建议时间 · 未验证开放时间 · 未包含交通规划</div><div id="feedback" role="status" aria-live="polite"></div><div id="warnings"></div><div id="timeline"></div><div id="additions"></div><div id="notes"></div></section>
-      <aside class="geo-column"><section class="map-panel"><div class="map-heading"><strong>M1 · 当日地点</strong><span>景点 · 餐饮 · 住宿</span></div><div id="map-status" role="status"></div><div id="map" aria-label="Google Maps 当天地点地图"></div><div class="legend"><span class="activity-dot">景点</span><span class="meal-dot">餐饮</span><span class="hotel-dot">住宿</span></div><p class="map-foot">只展示有坐标的地点；不提供交通规划。</p></section>
-      <section class="place-panel" aria-label="选中地点详情"><div class="map-heading"><strong>M2 · 地点详情</strong><span id="place-kind"></span></div><div id="place-detail" aria-live="polite"><div class="place-empty">选择行程中的地点查看详情</div></div></section></aside>
-    </div>
-  </section>
-</main>
-<script src="place-details.js"></script><script src="app.js"></script>
+  </main>
+</div>
+<script src="surface.js"></script><script src="place-details.js"></script><script src="app.js"></script>
 </body></html>

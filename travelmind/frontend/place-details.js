@@ -1,10 +1,11 @@
 "use strict";
 // Only selected-place details are fetched. No persistent cache, scraping or iframe.
 window.TravelMindDetails = (() => {
-  const node=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;};
+  const surfaceDocument = window.TravelMindSurface?.document || document;
+  const node=(tag,text,cls)=>{const n=surfaceDocument.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;};
   let sequence=0, selectedKey=null, currentResult=null, currentSelection=null;
   const inflight=new Map();
-  const root=()=>document.getElementById("place-detail");
+  const root=()=>surfaceDocument.getElementById("place-detail");
   const safeLink=(text,url)=>{try{const u=new URL(url);if(u.protocol!=="https:")return null;const a=node("a",text);a.href=u.href;a.target="_blank";a.rel="noopener noreferrer";return a;}catch{return null;}};
   function hoursForDate(hours,date){
     const weekday=new Date(date+"T12:00:00").getDay(),previous=(weekday+6)%7,result=[];
@@ -45,12 +46,12 @@ window.TravelMindDetails = (() => {
     if(official){const branding=node("div",undefined,"google-attribution");const logo=node("img");logo.src="https://maps.gstatic.com/mapfiles/api-3/images/powered-by-google-on-white3.png";logo.alt="Google Maps";branding.append(logo);box.append(branding);}
     if(!local.place_id)box.append(node("p","无可用地图详情 · 仅显示已保存字段，不自动匹配同名地点","subtle"));
   }
-  function clear(){sequence++;selectedKey=null;currentResult=null;currentSelection=null;document.getElementById("place-kind").textContent="";root().replaceChildren(node("div","选择行程中的地点查看详情","place-empty"));}
+  function clear(){sequence++;selectedKey=null;currentResult=null;currentSelection=null;surfaceDocument.getElementById("place-kind").textContent="";root().replaceChildren(node("div","选择行程中的地点查看详情","place-empty"));}
   async function select(local,day,kind,loadSDK,force=false){
     const key=day.day_id+":"+local.id+":"+(local.place_id||"");
     if(!force&&selectedKey===key&&currentResult)return;
     const token=++sequence;selectedKey=key;currentSelection={local,day,kind,loadSDK};currentResult=null;
-    document.getElementById("place-kind").textContent=kind;
+    surfaceDocument.getElementById("place-kind").textContent=kind;
     if(!local.place_id){draw(local,day,null,null);currentResult={local:true};return;}
     draw(local,day,null,"正在按 Place ID 加载 Google 官方详情…");
     try{

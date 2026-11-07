@@ -1,0 +1,34 @@
+/* Single source of truth: loaded in both Streamlit and the workspace iframe. */
+:root {
+  color-scheme: light;
+  --canvas: #f7f9fc;
+  --surface: #ffffff;
+  --ink: #172b4d;
+  --muted: #5c6d85;
+  --brand: #183b6b;
+  --brand-strong: #102e55;
+  --accent: #356dcc;
+  --on-primary: #ffffff;
+  --brand-soft: #eaf1fb;
+  --hover: #f0f5fc;
+  --border: #e2e8f0;
+  --border-active: #a5bbda;
+  --map-base: #edf2f8;
+  --meal: #506a9b;
+  --hotel: #665d91;
+  --danger: #a23434;
+  --danger-soft: #fff3f3;
+  --danger-border: #edc9c6;
+  --warning: #76531c;
+  --warning-soft: #fff9ec;
+  --warning-border: #ead7ad;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --radius: 14px;
+  --shadow-color: #172b4d0d;
+  --shadow: 0 3px 14px var(--shadow-color);
+}

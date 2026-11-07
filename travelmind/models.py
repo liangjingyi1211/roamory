@@ -129,48 +129,20 @@ class DailyPlan(Model):
                 raise ValueError("酒店引用类型不一致")
         return self
 
-class CostCategoryEstimate(Model):
-    category: Literal["food", "activities", "hotel", "local_transport"]
-    low: float | None = Field(default=None, ge=0, allow_inf_nan=False)
-    high: float | None = Field(default=None, ge=0, allow_inf_nan=False)
-    currency: str | None = None
-    basis: str | None = None
-    coverage_note: str | None = None
-
-    @model_validator(mode="after")
-    def valid_range(self):
-        if (self.low is None) != (self.high is None):
-            raise ValueError("费用上下限必须同时提供")
-        if self.low is not None and (self.low > self.high or not self.currency):
-            raise ValueError("费用区间或币种无效")
-        return self
-
-class CostEstimate(Model):
-    low: float | None = Field(default=None, ge=0, allow_inf_nan=False)
-    high: float | None = Field(default=None, ge=0, allow_inf_nan=False)
-    currency: str | None = None
-    is_complete: bool = False
-    categories: list[CostCategoryEstimate] = Field(default_factory=list)
-    excluded_categories: list[str] = Field(default_factory=lambda: ["flights"])
-    missing_information: list[str] = Field(default_factory=list)
-    note: str | None = None
-
-    @model_validator(mode="after")
-    def valid_range(self):
-        if (self.low is None) != (self.high is None):
-            raise ValueError("费用上下限必须同时提供")
-        if self.low is not None and (self.low > self.high or not self.currency):
-            raise ValueError("费用区间或币种无效")
-        if self.is_complete and self.low is None:
-            raise ValueError("完整估算必须有金额")
-        return self
-
 class TripPlan(TripRequest):
     trip_id: str = Field(default_factory=new_id)
     version: int = Field(default=1, ge=1)
     total_days: int = Field(ge=1)
     days: list[DailyPlan] = Field(default_factory=list)
-    estimated_total_cost: CostEstimate | None = None
+    @model_validator(mode="before")
+    @classmethod
+    def discard_legacy_cost(cls, data):
+        # Accept historical payloads without weakening validation of other fields.
+        if isinstance(data, dict) and "estimated_total_cost" in data:
+            data = dict(data)
+            data.pop("estimated_total_cost")
+        return data
+
 
     @model_validator(mode="after")
     def valid_days(self):

@@ -4,13 +4,11 @@ import sqlite3
 from datetime import time
 from pathlib import Path
 from .models import TripPlan, Restaurant, Activity, Hotel
-from .tools import estimate_cost
 from .timeline import migrate_plan, sync_day
 from .models import TimelineItem
 
 def load_plan(payload):
     plan = migrate_plan(TripPlan.model_validate_json(payload))
-    plan.estimated_total_cost = estimate_cost(plan)
     return plan
 
 class TripStore:
@@ -118,7 +116,6 @@ class TripStore:
                 cls = Hotel if slot == "hotel" else Restaurant
                 setattr(day, slot, cls(name=name.strip()) if action == "save" else None)
             sync_day(day)
-            plan.estimated_total_cost = estimate_cost(plan)
             plan = TripPlan.model_validate(plan.model_dump())
             plan.version += 1
             db.execute("UPDATE trips SET payload=?,version=?,updated=CURRENT_TIMESTAMP WHERE id=?", (plan.model_dump_json(), plan.version, trip_id))
@@ -149,7 +146,6 @@ class TripStore:
                         start_time=activity.planned_start_time, end_time=activity.planned_end_time,
                         notes="AI 建议当地时间，未验证开放时间"))
             sync_day(day)
-        plan.estimated_total_cost = estimate_cost(plan)
         plan = TripPlan.model_validate(plan.model_dump())
         # Version check occurs inside save's write transaction, after all remote work.
         self.save(plan)

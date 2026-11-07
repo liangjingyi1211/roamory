@@ -1,0 +1,50 @@
+[
+  {
+    "width": 1440,
+    "scrollWidth": 1440,
+    "cards": 5,
+    "brand": "rgb(24, 59, 107)",
+    "columns": "741.703px 674.297px",
+    "chatHeight": 123.59375,
+    "documentHeight": 1000,
+    "viewportHeight": 1000,
+    "journeyHeight": 431,
+    "journeyScrollHeight": 1135
+  },
+  {
+    "width": 1024,
+    "scrollWidth": 1024,
+    "cards": 5,
+    "brand": "rgb(24, 59, 107)",
+    "columns": "523.797px 476.203px",
+    "chatHeight": 123.59375,
+    "documentHeight": 1000,
+    "viewportHeight": 1000,
+    "journeyHeight": 431,
+    "journeyScrollHeight": 1400
+  },
+  {
+    "width": 768,
+    "scrollWidth": 768,
+    "cards": 5,
+    "brand": "rgb(24, 59, 107)",
+    "columns": "389.703px 354.297px",
+    "chatHeight": 123.59375,
+    "documentHeight": 1000,
+    "viewportHeight": 1000,
+    "journeyHeight": 431,
+    "journeyScrollHeight": 1400
+  },
+  {
+    "width": 375,
+    "scrollWidth": 375,
+    "cards": 5,
+    "brand": "rgb(24, 59, 107)",
+    "columns": "179.5px 179.5px",
+    "chatHeight": 119.59375,
+    "documentHeight": 1000,
+    "viewportHeight": 1000,
+    "journeyHeight": 529,
+    "journeyScrollHeight": 1605
+  }
+]

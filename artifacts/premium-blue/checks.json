@@ -1,0 +1,34 @@
+[
+  {
+    "width": 1440,
+    "scrollWidth": 1425,
+    "cards": 5,
+    "brand": "rgb(24, 59, 107)",
+    "columns": "663.812px 553.188px",
+    "chatHeight": 195.96875
+  },
+  {
+    "width": 1024,
+    "scrollWidth": 1009,
+    "cards": 5,
+    "brand": "rgb(24, 59, 107)",
+    "columns": "447.812px 373.188px",
+    "chatHeight": 195.96875
+  },
+  {
+    "width": 768,
+    "scrollWidth": 753,
+    "cards": 5,
+    "brand": "rgb(24, 59, 107)",
+    "columns": "753px",
+    "chatHeight": 226.359375
+  },
+  {
+    "width": 375,
+    "scrollWidth": 360,
+    "cards": 5,
+    "brand": "rgb(24, 59, 107)",
+    "columns": "360px",
+    "chatHeight": 247.15625
+  }
+]

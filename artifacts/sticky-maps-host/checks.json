@@ -1,0 +1,110 @@
+[
+  {
+    "width": 1440,
+    "scrollWidth": 1440,
+    "cards": 7,
+    "brand": "rgb(24, 59, 107)",
+    "columns": "754.281px 685.719px",
+    "chatHeight": 163.578125,
+    "documentHeight": 2176,
+    "viewportHeight": 940,
+    "journeyHeight": 1762,
+    "journeyScrollHeight": 1762,
+    "host": {
+      "height": 1000,
+      "mainHeight": 1000,
+      "iframeHeight": 940,
+      "iframeBottom": 1000
+    }
+  },
+  {
+    "width": 1024,
+    "scrollWidth": 1024,
+    "cards": 7,
+    "brand": "rgb(24, 59, 107)",
+    "columns": "536.375px 487.625px",
+    "chatHeight": 163.578125,
+    "documentHeight": 2477,
+    "viewportHeight": 708,
+    "journeyHeight": 2165,
+    "journeyScrollHeight": 2165,
+    "host": {
+      "height": 768,
+      "mainHeight": 768,
+      "iframeHeight": 708,
+      "iframeBottom": 768
+    }
+  },
+  {
+    "width": 768,
+    "scrollWidth": 768,
+    "cards": 7,
+    "brand": "rgb(24, 59, 107)",
+    "columns": "402.281px 365.719px",
+    "chatHeight": 163.578125,
+    "documentHeight": 2589,
+    "viewportHeight": 964,
+    "journeyHeight": 2165,
+    "journeyScrollHeight": 2165,
+    "host": {
+      "height": 1024,
+      "mainHeight": 1024,
+      "iframeHeight": 964,
+      "iframeBottom": 1024
+    }
+  },
+  {
+    "width": 375,
+    "scrollWidth": 375,
+    "cards": 7,
+    "brand": "rgb(24, 59, 107)",
+    "columns": "187.5px 187.5px",
+    "chatHeight": 151.578125,
+    "documentHeight": 2634,
+    "viewportHeight": 752,
+    "journeyHeight": 2333,
+    "journeyScrollHeight": 2333,
+    "host": {
+      "height": 812,
+      "mainHeight": 812,
+      "iframeHeight": 752,
+      "iframeBottom": 812
+    }
+  },
+  {
+    "width": 1440,
+    "scrollWidth": 1440,
+    "cards": 7,
+    "brand": "rgb(24, 59, 107)",
+    "columns": "754.281px 685.719px",
+    "chatHeight": 163.578125,
+    "documentHeight": 1982,
+    "viewportHeight": 500,
+    "journeyHeight": 1762,
+    "journeyScrollHeight": 1762,
+    "host": {
+      "height": 560,
+      "mainHeight": 560,
+      "iframeHeight": 500,
+      "iframeBottom": 560
+    }
+  },
+  {
+    "width": 812,
+    "scrollWidth": 812,
+    "cards": 7,
+    "brand": "rgb(24, 59, 107)",
+    "columns": "425.328px 386.672px",
+    "chatHeight": 163.578125,
+    "documentHeight": 2304,
+    "viewportHeight": 315,
+    "journeyHeight": 2165,
+    "journeyScrollHeight": 2165,
+    "host": {
+      "height": 375,
+      "mainHeight": 375,
+      "iframeHeight": 315,
+      "iframeBottom": 375
+    }
+  }
+]

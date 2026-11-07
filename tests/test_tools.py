@@ -6,7 +6,7 @@ from google.adk.agents import LlmAgent
 from google.adk.events import Event, EventActions
 from google.genai import types
 from streamlit.testing.v1 import AppTest
-from travelmind.tools import estimate_cost, count_nights
+from travelmind.tools import count_nights
 from travelmind.models import TripRequest, TripPlan, Activity, Hotel, Restaurant, initialize_plan
 from travelmind.storage import TripStore
 from travelmind.agent import FoodOutput, merge_recommendations
@@ -22,17 +22,32 @@ def isolate_audit(monkeypatch):
 def make_plan():
     return initialize_plan(TripRequest(destination="Tokyo", start_date=date(2027, 4, 1), end_date=date(2027, 4, 3)))
 
-def test_cost():
+def test_legacy_cost_is_discarded_without_losing_place_prices(tmp_path):
     plan = make_plan()
-    plan.days[0].activities = [Activity(name="A", ticket_price=10, currency="JPY"), Activity(name="B", ticket_price=20, currency="SGD")]
-    plan.days[0].hotel = Hotel(name="H", price_per_night=100, currency="SGD")
-    result = estimate_cost(plan)
-    assert result.low is None and result.high is None and not result.is_complete
-    assert result.excluded_categories == ["flights", "local_transport"]
-    amounts = {(c.category, c.currency): c.low for c in result.categories}
-    assert amounts[("activities", "JPY")] == 10
-    assert amounts[("activities", "SGD")] == 20
-    assert amounts[("food", None)] is None
+    plan.days[0].activities = [Activity(name="A", ticket_price=10, currency="JPY")]
+    plan.days[0].hotel = Hotel(name="H", price_per_night=100, currency="JPY")
+    payload = plan.model_dump(mode="json")
+    payload["estimated_total_cost"] = {"low": "invalid legacy value"}
+    restored = TripPlan.model_validate(payload)
+    assert "estimated_total_cost" not in restored.model_dump()
+    assert restored.days[0].activities[0].ticket_price == 10
+    assert restored.days[0].hotel.price_per_night == 100
+    store = TripStore(tmp_path / "legacy.sqlite3")
+    with store.connect() as db:
+        db.execute("INSERT INTO trips(id,payload,version) VALUES(?,?,?)", (plan.trip_id, json.dumps(payload), 1))
+    assert store.list_trips()[0][0] == plan.trip_id
+    loaded = store.get(plan.trip_id)
+    assert "estimated_total_cost" not in loaded.model_dump()
+    store.save(loaded)
+    with store.connect() as db:
+        written = json.loads(db.execute("SELECT payload FROM trips WHERE id=?", (plan.trip_id,)).fetchone()[0])
+    assert "estimated_total_cost" not in written
+    assert written["days"][0]["hotel"]["price_per_night"] == 100
+    assert "estimated_total_cost" not in TripPlan.model_json_schema()["properties"]
+    payload["unexpected_field"] = True
+    with pytest.raises(ValueError):
+        TripPlan.model_validate(payload)
+
 
 def test_nights():
     assert count_nights("2027-04-01", "2027-04-08")["nights"] == 7
@@ -88,14 +103,14 @@ def test_persistent_edits_and_page(tmp_path, monkeypatch):
     refreshed.query_params["trip"] = plan.trip_id
     refreshed.run(timeout=20)
     assert not refreshed.exception
-    assert any("Tokyo" in h.value for h in refreshed.header)
+    assert any("workspace-mode" in m.value for m in refreshed.markdown)
     payload = workspace_payload(store.get(plan.trip_id))
     assert any(p["name"] == "页面新增早餐" for p in payload["days"][0]["places"].values())
     store.edit(plan.trip_id, day.day_id, "lunch", "delete")
     reloaded = TripStore(path).get(plan.trip_id)
     assert reloaded.days[0].lunch is None
     assert "lunch" in reloaded.days[0].model_dump()
-    assert reloaded.estimated_total_cost.low is None
+    assert "estimated_total_cost" not in reloaded.model_dump()
 
 def test_coordinator_flow(monkeypatch):
     import asyncio
