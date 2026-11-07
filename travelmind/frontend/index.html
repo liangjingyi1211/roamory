@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TravelMind daily workspace</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main class="workspace">
+  <nav class="days" aria-label="每日行程"><div class="eyebrow">YOUR JOURNEY</div><div id="days"></div></nav>
+  <section class="detail">
+    <header><div><div class="eyebrow" id="date-label"></div><h1 id="day-title"></h1></div><span class="pill">每日时间线</span></header>
+    <div class="detail-grid">
+      <section class="schedule" aria-label="当天时间线"><div class="disclaimer">当地建议时间 · 未验证开放时间 · 未包含交通规划</div><div id="feedback" role="status" aria-live="polite"></div><div id="warnings"></div><div id="timeline"></div><div id="additions"></div><div id="notes"></div></section>
+      <aside class="map-panel"><div class="map-heading"><strong>探索这一天</strong><span>景点 · 餐饮 · 住宿</span></div><div id="map-status" role="status"></div><div id="map" aria-label="Google Maps 当天地点地图"></div><div class="legend"><span class="activity-dot">景点</span><span class="meal-dot">餐饮</span><span class="hotel-dot">住宿</span></div><p class="map-foot">只展示有坐标的地点；手动输入名称不会自动定位。</p></aside>
+    </div>
+  </section>
+</main>
+<script src="app.js"></script>
+</body></html>

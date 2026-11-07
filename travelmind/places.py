@@ -2,6 +2,7 @@
 import json
 import os
 import time
+import math
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from dotenv import load_dotenv
@@ -17,11 +18,11 @@ class PlacesClient:
         self._cache = {}
         self._destinations = {}
 
-    def _request(self, payload, fields):
+    def _request(self, payload, fields, endpoint="searchText"):
         key = os.getenv("GOOGLE_MAPS_API_KEY")
         if not key:
             raise PlacesError("未找到 GOOGLE_MAPS_API_KEY，无法核实真实地点")
-        request = Request("https://places.googleapis.com/v1/places:searchText",
+        request = Request(f"https://places.googleapis.com/v1/places:{endpoint}",
             data=json.dumps(payload).encode(),
             headers={"Content-Type": "application/json", "X-Goog-Api-Key": key,
                 "X-Goog-FieldMask": ",".join("places." + f for f in fields.split(","))}, method="POST")
@@ -59,7 +60,7 @@ class PlacesClient:
             "tourist_attraction": {"tourist_attraction", "museum", "park", "historical_landmark"}}[kind]
         # Preferences (including negations like 'not spicy') belong to the food
         # specialist, not a geographic text query that can match unrelated places.
-        query = f"{kind} in {destination}"
+        query = f"{kind} {preferences} in {destination}" if kind == "tourist_attraction" and preferences else f"{kind} in {destination}"
         cached = self._cache.get(query)
         if cached and time.monotonic() - cached[0] < 900:
             return cached[1]
@@ -82,6 +83,35 @@ class PlacesClient:
         self._cache[query] = (time.monotonic(), rows)
         return rows
 
+    def search_nearby(self, destination, kind, latitude, longitude, radius=2000):
+        """Bounded circle search. Distances are geographic filtering, never travel times."""
+        if kind not in {"restaurant", "hotel"}:
+            raise ValueError("附近搜索仅支持餐厅和酒店")
+        if not -90 <= latitude <= 90 or not -180 <= longitude <= 180 or not 0 < radius <= 10000:
+            raise ValueError("附近搜索坐标或半径无效")
+        key = (destination, kind, round(latitude, 5), round(longitude, 5), radius)
+        cached = self._cache.get(key)
+        if cached and time.monotonic() - cached[0] < 900:
+            return cached[1]
+        region = self.resolve_destination(destination)
+        payload = {"includedTypes": ["restaurant" if kind == "restaurant" else "lodging"],
+            "maxResultCount": 20, "rankPreference": "DISTANCE", "languageCode": "zh-CN",
+            "locationRestriction": {"circle": {"center": {"latitude": latitude, "longitude": longitude}, "radius": radius}}}
+        fields = "id,displayName,formattedAddress,location,googleMapsUri,primaryType,types,rating,priceLevel,regularOpeningHours,businessStatus,addressComponents"
+        rows = self._request(payload, fields, endpoint="searchNearby")
+        expected = {"restaurant"} if kind == "restaurant" else {"hotel", "lodging"}
+        accepted = [r for r in rows if r.get("id") and r.get("displayName", {}).get("text")
+            and expected.intersection(r.get("types", [])) and country_code(r) == country_code(region)
+            and r.get("businessStatus") not in {"CLOSED_PERMANENTLY", "CLOSED_TEMPORARILY"}
+            and r.get("location", {}).get("latitude") is not None
+            and r.get("location", {}).get("longitude") is not None
+            and distance_m(latitude, longitude, r["location"]["latitude"], r["location"]["longitude"]) <= radius]
+        audit("nearby_search", destination=destination, kind=kind, anchor={"latitude": latitude, "longitude": longitude},
+            radius=radius, received=len(rows), accepted=len(accepted), candidates=[
+                {"id": r["id"], "name": r["displayName"]["text"], "address": r.get("formattedAddress")} for r in accepted])
+        self._cache[key] = (time.monotonic(), accepted)
+        return accepted
+
 client = PlacesClient()
 
 def country_code(row):
@@ -98,6 +128,11 @@ def within_destination(row, region):
     if low["longitude"] <= high["longitude"]:
         return low["longitude"] <= longitude <= high["longitude"]
     return longitude >= low["longitude"] or longitude <= high["longitude"]
+
+def distance_m(lat1, lon1, lat2, lon2):
+    a, b = math.radians(lat1), math.radians(lat2)
+    value = math.sin((b - a) / 2) ** 2 + math.cos(a) * math.cos(b) * math.sin(math.radians(lon2 - lon1) / 2) ** 2
+    return 6371000 * 2 * math.asin(min(1, math.sqrt(value)))
 
 def opening_hours(row: dict) -> list[dict]:
     result = []

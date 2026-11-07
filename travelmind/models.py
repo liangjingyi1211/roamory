@@ -70,6 +70,29 @@ class Hotel(PlaceBase):
     currency: str | None = None
     rating: float | None = Field(default=None, ge=0, le=5)
 
+class TimelineItem(Model):
+    id: str = Field(default_factory=new_id)
+    item_type: Literal["activity", "meal", "hotel", "custom"]
+    reference_id: str | None = None
+    meal_type: Literal["breakfast", "lunch", "dinner"] | None = None
+    title: str
+    start_time: time | None = None
+    end_time: time | None = None
+    notes: str | None = None
+
+    @model_validator(mode="after")
+    def valid_time(self):
+        # All times are destination-local wall times, never UTC instants.
+        self.start_time = self.start_time.replace(tzinfo=None) if self.start_time else None
+        self.end_time = self.end_time.replace(tzinfo=None) if self.end_time else None
+        if self.end_time and not self.start_time:
+            raise ValueError("结束时间需要对应开始时间")
+        if self.start_time and self.end_time and self.start_time >= self.end_time:
+            raise ValueError("开始时间必须早于结束时间；跨日项目请拆分")
+        if (self.item_type == "meal") != (self.meal_type is not None):
+            raise ValueError("餐饮时间线必须有有效餐次")
+        return self
+
 class DailyPlan(Model):
     day_id: str = Field(default_factory=new_id)
     day_index: int = Field(ge=1)
@@ -81,6 +104,30 @@ class DailyPlan(Model):
     activities: list[Activity] = Field(default_factory=list)
     hotel: Hotel | None = None
     notes: list[str] = Field(default_factory=list)
+    timeline: list[TimelineItem] = Field(default_factory=list)
+    timeline_warnings: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def valid_references(self):
+        places = {p.id: p for p in [*self.activities, self.breakfast, self.lunch, self.dinner, self.hotel] if p}
+        seen, timeline_ids = set(), set()
+        for item in self.timeline:
+            if item.id in timeline_ids:
+                raise ValueError("时间线 ID 重复")
+            timeline_ids.add(item.id)
+            if not item.reference_id:
+                continue
+            if item.reference_id not in places or item.reference_id in seen:
+                raise ValueError("时间线包含无效或重复地点引用")
+            seen.add(item.reference_id)
+            place = places[item.reference_id]
+            if item.item_type == "meal" and getattr(self, item.meal_type) is not place:
+                raise ValueError("餐次引用不一致")
+            if item.item_type == "activity" and not isinstance(place, Activity):
+                raise ValueError("景点引用类型不一致")
+            if item.item_type == "hotel" and place is not self.hotel:
+                raise ValueError("酒店引用类型不一致")
+        return self
 
 class CostCategoryEstimate(Model):
     category: Literal["food", "activities", "hotel", "local_transport"]

@@ -17,7 +17,6 @@ def estimate_cost(plan: TripPlan) -> CostEstimate:
         "activities": [(a.ticket_price, a.currency) for d in plan.days for a in d.activities],
         "hotel": [(d.hotel.price_per_night, d.hotel.currency) if d.hotel else (None, None)
                   for i, d in enumerate(plan.days) if d.hotel is not None or i < len(plan.days) - 1],
-        "local_transport": [(None, None)],
     }
     for category, items in groups.items():
         known = [(v, c) for v, c in items if v is not None and c]
@@ -38,4 +37,5 @@ def estimate_cost(plan: TripPlan) -> CostEstimate:
     total = float(sum((Decimal(str(c.low)) for c in categories if c.low is not None), Decimal(0))) if complete else None
     return CostEstimate(low=total, high=total, currency=next(iter(currencies)) if complete else None,
         is_complete=complete, categories=categories, missing_information=missing,
+        excluded_categories=["flights", "local_transport"],
         note="总费用暂无法估算（价格信息不足）；类别金额仅为已知项目小计。机票不包含在内。" if not complete else "不含机票的参考费用。")
