@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import streamlit.components.v1 as components
 from .timeline import opening_for_date
+from .journal import JournalStore
 
 _component = components.declare_component("travelmind_workspace", path=str(Path(__file__).parent / "frontend"))
 
@@ -26,7 +27,9 @@ def workspace_payload(plan):
 def workspace(plan, acknowledgment=None, conversation=None):
     key, message = browser_map_config()
     return _component(plan=workspace_payload(plan), browser_key=key, map_message=message,
-        acknowledgment=acknowledgment, conversation=conversation or [], default=None, key="workspace:" + plan.trip_id)
+        acknowledgment=acknowledgment, conversation=conversation or [],
+        journal_entries=JournalStore().workspace_entries(plan.trip_id),
+        default=None, key="workspace:" + plan.trip_id)
 
 def apply_workspace_event(store, trip_id, event):
     if not isinstance(event, dict) or event.get("trip_id") != trip_id:

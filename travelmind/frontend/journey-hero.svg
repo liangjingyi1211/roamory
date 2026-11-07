@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 620 320" role="img" aria-labelledby="title desc">
+  <title id="title">沿海城市的旅行手绘地图</title><desc id="desc">海岸、城市与山丘之间，一条虚线串联起旅程中的几个停靠点。</desc>
+  <path fill="#eaf1fb" d="M100 0h520v320H10C130 250 30 180 100 0Z"/>
+  <path fill="#d7e5f8" d="M340 0h280v320H235c90-78-30-105 50-164S300 63 340 0Z"/>
+  <path fill="none" stroke="#c2d5ef" stroke-width="2" d="M399 10c-40 90-15 102-65 154s28 97-23 145M431 0c-41 100-11 113-63 167s28 93-22 153"/>
+  <g fill="#fff" stroke="#bacce3" stroke-width="2"><path d="m120 178 60-36 53 30v60l-60 35-53-30Z"/><path d="m195 94 57-33 48 28v64l-57 32-48-28Z"/><path d="m70 72 40-23 37 21v52l-40 23-37-21Z"/></g>
+  <g fill="none" stroke="#8ba9d0" stroke-width="2"><path d="m120 178 53 30 60-36m-60 36v59M195 94l48 28 57-33m-57 33v63M70 72l37 21 40-23m-40 23v52"/></g>
+  <g stroke="#d0dff1" stroke-width="2"><path d="m147 194 0 29m13-22v29m59-121v31m13-23v31m-145-65v29"/></g>
+  <path fill="none" stroke="#356dcc" stroke-width="3" stroke-linecap="round" stroke-dasharray="5 10" d="M71 236c-5 66 133 78 204 20S350 88 449 101s99 97 72 134"/>
+  <g fill="#fff" stroke="#183b6b" stroke-width="3"><circle cx="71" cy="236" r="8"/><circle cx="319" cy="202" r="8"/><circle cx="521" cy="235" r="8"/></g>
+  <g fill="#183b6b"><path d="m438 59 42 15-19 6-7 20Z"/><path d="m374 255 16-34 17 34Z"/><path d="m409 271 19-43 23 43Z"/></g>
+  <g fill="none" stroke="#88a8d2" stroke-width="2"><path d="M478 163h39m-28 12h44M353 66h26m-17 12h29"/><circle cx="543" cy="42" r="15"/></g>
+</svg>

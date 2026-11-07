@@ -1,8 +1,12 @@
-# TravelMind V6
+# TravelMind V7
 
 Google ADK + Streamlit + SQLite 旅行规划器。保留三个专家和 V3 完整生成流程，新增仅支持替换、增加、单日重新规划的 AI 局部修改。工作台提供每日时间线、M1 地点地图与 M2 官方地点详情，左下角新建入口提供独立创建与历史旅程视图。地图不提供路线、交通方式、ETA 或交通费用。
 
-当前版本的布局、滚动、费用模块移除和验收记录见 [V6 实施报告](V6_IMPLEMENTATION.md)。此前的状态流、意图契约与版本保护见 [V4 实施报告](V4_IMPLEMENTATION.md)。
+V7 新增旅行插图首页、「我的行程」与「我的旅行日记」，支持在景点、餐厅和酒店卡片记录感想与上传照片。实现与验收见 [V7 实施报告](V7_IMPLEMENTATION.md)。
+
+打开首页后，在左侧创建旅程，或通过右侧入口打开已保存行程与日记。行程页的「记录」按钮提供图文输入、上传预览、移除、保存和取消；日记库直接展示文字与图片，标题旁的「编辑」按钮可直接修改文字、添加/移除图片。日记独立保存，不参与 Agent 推荐，不修改行程版本、地图或时间线。地点被替换或删除后，原记录仍可在日记库浏览和编辑。
+
+页面入口：`?view=new` 创建首页、`?view=trips` 我的行程、`?view=journals` 我的旅行日记、`?trip=<id>` 指定行程。没有指定旅程时默认打开首页。
 
 ## 启动与配置
 
@@ -128,26 +132,30 @@ V6 已移除整段旅行费用估算：不生成总额、区间或类别小计�
 | `travelmind/timeline.py` | 编排、排序、冲突检测、迁移、当日营业时间 |
 | `travelmind/storage.py` | SQLite 局部事务编辑、时间权威同步 |
 | `travelmind/ui.py` | 浏览器密钥隔离、视图数据和编辑事件桥接 |
+| `travelmind/pages.py` | Hero 首页、已有行程库、旅行日记库与编辑 |
+| `travelmind/journal.py` | 独立日记模型、SQLite 读写、地点关联与并发版本保护 |
 | `travelmind/assistant.py` | 三意图结构化解析、目标解析、专家局部调度、受限补丁与回滚 |
 | `travelmind/frontend/` | 日期选择、时间线、编辑表单、Google Maps 生命周期 |
-| `streamlit_app.py` | 新建表单、历史旅程、视口工作区挂载与保存反馈 |
+| `streamlit_app.py` | 页面路由、工作区挂载、编辑与日记事件分流 |
 | `tests/test_tools.py`、`tests/test_assistant.py` | 生成与编辑回归、V4 范围保护、并发与迁移 |
+| `tests/test_journal.py` | 日记持久化、归属校验、旧数据与首页创建/导航回归 |
 
 ```powershell
-uv run pytest -q
+uv run python -m pytest -q
 uv run python -m compileall -q travelmind streamlit_app.py
 node --check travelmind/frontend/app.js
 node --check travelmind/frontend/place-details.js
+node --test --experimental-test-isolation=none tests/frontend_workspace.test.cjs
 ```
 
-静态组件无需 npm 构建。开发期间已通过真实 Places/Gemini 三天悉尼行程：每天 2 个景点、三餐均有推荐、前两晚酒店不同、离开日无酒店，统一时间线无直接重叠。验证数据与用户库分开保存。
+静态组件无需 npm 构建。当前验证结果：30 项 Python 测试、6 项前端交互测试通过；Python 编译、JavaScript 语法和 Git 差异检查通过。Chrome 使用临时数据库验证六组尺寸下的原生主窗口滚动、侧栏地图、日期切换、地点编辑与日记新增/编辑/整页重读，以及桌面和手机首页、行程库和日记库。实际浏览器上传图片后，已验证卡片预览、保存重读、日记图片展示，以及通过独立编辑按钮修改文字和替换图片。
 
-本次验证结果：8 项 pytest 测试通过，Python 编译、JavaScript 语法和 Git 差异检查通过。无头 Chrome 实际验证了桌面/手机布局、手机无横向溢出、日期切换、时间编辑与重叠提示、地点替换/删除和刷新恢复；操作前后生成日志数量相同。独立 JavaScript API 测试替身验证了 Marker 清理、双向高亮、缺坐标处理，以及跨日期复用单一 Map 实例。一次性浏览器检查脚本验证后删除。
-
-V4 本轮已验证真实模型解析和 Food Agent 单餐推荐，14 项测试通过；浏览器已验证 M1/M2 联动和真实聊天保存。当前真实 M2 请求返回 403 / PERMISSION_DENIED，降级显示与重试已通过验证；仍需核对浏览器密钥对应项目的 Places API (New) 启用与限制。测试替身不代表真实详情授权成功。
+浏览器复验：`.venv/Scripts/python.exe tests/preview_blue.py --host`；仅检查首页和列表可追加 `--pages-only`。截图在 `artifacts/v7-host/`。本轮使用合成行程、离线地图与受控服务替身，未重新执行真实 Gemini/Places 在线调用，不把这些测试视为在线权限验证。
 
 ### 已知边界
 
-没有交通规划，也不保证多城市行程的交通可执行性；国家级目的地建议细化为城市。Activity 初始候选仍有 20 个上限；当前未增加城市拆分或无限补查。到离时间继续通过备注表达，没有独立的确定性到离字段。营业时段契约无法无损表达源数据缺少关闭时间的 24 小时表示，故不推断全天营业。编辑时未实现多人并发版本冲突提示。
+没有交通规划，也不保证多城市行程的交通可执行性；国家级目的地建议细化为城市。Activity 初始候选仍有 20 个上限；当前未增加城市拆分或无限补查。到离时间继续通过备注表达，没有独立的确定性到离字段。营业时段契约无法无损表达源数据缺少关闭时间的 24 小时表示，故不推断全天营业。
+
+日记仍为本机单用户数据，不提供账号隔离；每个地点卡片一条可编辑的图文记录，文字上限 10000 字符，也支持只有图片。每条最多 6 张 JPG/PNG/WebP 静态图片，每张不超过 5MB、4000 万像素。图片原件与预览保存在同一 SQLite 文件的独立图片表中，不需要外部图床。移除图片仅在保存后生效，取消不改动存储；暂不提供整条日记删除。时间标注 UTC。采用独立 revision 防止覆盖其他窗口的新编辑，冲突后需刷新再提交。旧纯文字记录无需重建；图片字段默认空列表，新增图片表自动创建，TripPlan JSON 不新增日记或图片字段。
 
 参考：[Nearby Search](https://developers.google.com/maps/documentation/places/web-service/nearby-search)、[Maps JavaScript API 密钥](https://developers.google.com/maps/documentation/javascript/troubleshooting)、[Streamlit 双向组件](https://docs.streamlit.io/develop/concepts/custom-components/components-v1/intro)。

@@ -11,6 +11,7 @@ const labels = {activity:"景点",meal:"餐饮",hotel:"当晚住宿",custom:"自
 let plan, selectedDay, selectedPlaceRef=null, map, info, mapPromise, activeId, pending, lastAck, renderedSignature, pendingPrompt="";
 const markers = new Map();
 let configuredKey = "", mapMessage = "";
+let journalEntries = [];
 function resize(){
   surface?.refreshInset();
   post("streamlit:setFrameHeight", {height:surface?.mounted?0:Math.ceil(surfaceDocument.documentElement.scrollHeight || surfaceDocument.body.scrollHeight)});
@@ -56,6 +57,58 @@ function editor(container, day, slot, place, item, mode="name"){
   };
   container.append(form);resize();(name||start).focus();
 }
+function journalEditor(container, day, place, itemType){
+  if(pending)return;
+  container.querySelector(".journal-form")?.remove();
+  const kind=itemType==="meal"?"restaurant":itemType;
+  const existing=journalEntries.find(entry=>entry.day_id===day.day_id&&entry.item_type===kind&&entry.item_id===place.id);
+  const form=el("form",undefined,"edit-form journal-form"),heading=el("h3",`记录 · ${place.name}`);
+  const label=el("label","写下此刻的感想、见闻或小惊喜"),text=el("textarea");
+  text.value=existing?.content||"";text.rows=5;text.maxLength=10000;
+  label.append(text);form.append(heading,label,el("p","仅保存为个人日记，不参与行程规划。","subtle"));
+  const kept=new Set((existing?.images||[]).map(image=>image.id)),uploads=[];
+  const photoLabel=el("label","添加图片 · 最多 6 张，每张不超过 5MB"),files=el("input");
+  files.type="file";files.multiple=true;files.accept="image/jpeg,image/png,image/webp";photoLabel.append(files);
+  const gallery=el("div",undefined,"journal-photo-grid"),status=el("div",undefined,"journal-upload-status");status.setAttribute("role","status");
+  form.append(photoLabel,gallery,status);
+  let reading=false;
+  const renderPhotos=()=>{
+    gallery.replaceChildren();
+    const tile=(name,url,remove)=>{
+      const box=el("div",undefined,"journal-photo"),img=el("img");img.src=url;img.alt=name||"旅行照片";
+      box.append(img,button("移除",()=>{remove();renderPhotos();},"remove-photo"));gallery.append(box);
+    };
+    for(const image of existing?.images||[])if(kept.has(image.id))tile(image.name,image.thumbnail_url,()=>kept.delete(image.id));
+    uploads.forEach((image,index)=>tile(image.name,image.data_url,()=>uploads.splice(index,1)));
+  };
+  const readFile=file=>new Promise((resolve,reject)=>{
+    const reader=new FileReader();reader.onload=()=>resolve({name:file.name,data_url:reader.result});reader.onerror=()=>reject(Error("图片读取失败，请重新选择"));reader.readAsDataURL(file);
+  });
+  files.onchange=async()=>{
+    const selected=[...files.files];if(!selected.length||reading)return;
+    status.textContent="";text.setCustomValidity("");
+    if(kept.size+uploads.length+selected.length>6){status.textContent="每条记录最多保留 6 张图片";files.value="";return;}
+    if(selected.some(file=>file.size>5*1024*1024||!["image/jpeg","image/png","image/webp"].includes(file.type))){status.textContent="请选择不超过 5MB 的 JPG、PNG 或 WebP 图片";files.value="";return;}
+    reading=true;save.disabled=true;files.disabled=true;status.textContent="正在读取图片…";
+    try{uploads.push(...await Promise.all(selected.map(readFile)));renderPhotos();status.textContent="图片已准备好，保存记录后生效。";}
+    catch(error){status.textContent=error.message;}
+    finally{reading=false;save.disabled=false;files.disabled=false;files.value="";resize();}
+  };
+  renderPhotos();
+  const controls=el("div",undefined,"form-buttons"),save=el("button","保存记录","primary");save.type="submit";
+  controls.append(save,button("取消",()=>{form.remove();container.querySelector(".record")?.focus();resize();}));form.append(controls);
+  form.onsubmit=event=>{
+    event.preventDefault();if(pending||reading)return;
+    if(!text.value.trim()&&!kept.size&&!uploads.length){text.setCustomValidity("请写下感想或添加图片");text.reportValidity();return;}
+    pending=crypto.randomUUID();feedback("正在保存旅行记录…");
+    surfaceDocument.querySelectorAll("button,input,textarea").forEach(node=>node.disabled=true);
+    post("streamlit:setComponentValue",{dataType:"json",value:{event_id:pending,kind:"journal",trip_id:plan.trip_id,
+      day_id:day.day_id,item_type:kind,item_id:place.id,content:text.value,revision:existing?.revision??null,
+      keep_image_ids:[...kept],new_images:uploads}});
+  };
+  text.oninput=()=>text.setCustomValidity("");
+  container.append(form);resize();text.focus({preventScroll:true});revealInPage(form);
+}
 function renderDays(){
   $("days").replaceChildren();
   for(const day of [...plan.days].sort((a,b)=>a.date.localeCompare(b.date))){const b=button("",()=>selectDay(day.day_id),"day"+(day.day_id===selectedDay?" active":""));b.setAttribute("aria-pressed",day.day_id===selectedDay?"true":"false");
@@ -63,7 +116,7 @@ function renderDays(){
     const meals=[day.breakfast,day.lunch,day.dinner].filter(Boolean).length;b.append(el("small",`${day.activities.length} 个景点 · ${meals} 餐${day.hotel?" · 已选住宿":""}`));$("days").append(b);
   }
 }
-function renderDay(){
+function renderDay(refreshMap=true){
   const day=current();
   $("warnings").replaceChildren(...day.timeline_warnings.map(t=>el("div",t,"notice")));
   $("notes").replaceChildren(...day.notes.map(t=>el("div",t,"notice")));
@@ -88,12 +141,17 @@ function renderDay(){
       if(index>0)actions.append(button("上移",()=>submit(day,slot,"move",{item_id:place.id,direction:-1})));
       if(index<day.activities.length-1)actions.append(button("下移",()=>submit(day,slot,"move",{item_id:place.id,direction:1})));
     }
+    if(place&&["activity","meal","hotel"].includes(item.item_type)){
+      const kind=item.item_type==="meal"?"restaurant":item.item_type;
+      const recorded=journalEntries.some(entry=>entry.day_id===day.day_id&&entry.item_type===kind&&entry.item_id===place.id);
+      actions.append(button(recorded?"编辑记录":"记录",()=>journalEditor(body,day,place,item.item_type),"record"));
+    }
     body.append(actions);row.append(when,rail,body);root.append(row);
   }
   const additions=$("additions");additions.replaceChildren();
   additions.append(button("＋ 添加景点",()=>editor(additions,day,"activities",null,null),"add-button"));
   if(!day.hotel)additions.append(button("＋ 添加当晚住宿",()=>editor(additions,day,"hotel",null,null),"add-button"));
-  resize();updateMarkers();
+  resize();if(refreshMap)updateMarkers();
 }
 function selectDay(id){if(pending)return;selectedDay=id;activeId=null;selectedPlaceRef=null;TravelMindDetails.clear();try{sessionStorage.setItem("day:"+plan.trip_id,id);}catch{}renderDays();renderDay();revealInPage($("journey-content"),true);feedback("");}
 function focusPlace(id){
@@ -146,16 +204,18 @@ window.addEventListener("message",event=>{
   const args=event.data.args;if(!args?.plan)return;
   // Streamlit can resend unchanged props on layout/resize notifications. Do not
   // destroy an in-progress editor (or recreate markers) for those notifications.
-  const signature=JSON.stringify([args.plan,args.browser_key,args.map_message,args.acknowledgment,args.conversation]);
+  const signature=JSON.stringify([args.plan,args.browser_key,args.map_message,args.acknowledgment,args.conversation,args.journal_entries]);
   if(signature===renderedSignature)return;
   if(pending&&args.acknowledgment?.event_id!==pending)return;
   renderedSignature=signature;
   const acknowledgment=args.acknowledgment;
+  const journalOnly=acknowledgment?.success&&acknowledgment.kind==="journal"&&plan&&JSON.stringify(plan)===JSON.stringify(args.plan);
   if(acknowledgment&&acknowledgment.event_id===pending){
     pending=null;surfaceDocument.querySelectorAll("button,input,textarea").forEach(n=>n.disabled=false);
     if(!acknowledgment.success){feedback(acknowledgment.message,true);lastAck=acknowledgment.event_id;return;}
   }
   const differentTrip=plan?.trip_id!==args.plan.trip_id;plan=args.plan;configuredKey=args.browser_key||"";mapMessage=args.map_message||"";
+  journalEntries=args.journal_entries||[];
   if(differentTrip){selectedPlaceRef=null;activeId=null;TravelMindDetails.clear();}
   if(selectedPlaceRef){const place=current().places[selectedPlaceRef.id];
     if(!place||selectedPlaceRef.dayId!==selectedDay||selectedPlaceRef.fingerprint!==JSON.stringify([place.name,place.place_id,place.latitude,place.longitude])){
@@ -165,7 +225,7 @@ window.addEventListener("message",event=>{
   if(differentTrip||!plan.days.some(d=>d.day_id===selectedDay)){
     try{selectedDay=sessionStorage.getItem("day:"+plan.trip_id);}catch{}if(!plan.days.some(d=>d.day_id===selectedDay))selectedDay=plan.days[0].day_id;
   }
-  renderDays();renderDay();
+  renderDays();renderDay(!journalOnly);
   renderChat(args.conversation||[]);
   if(acknowledgment?.success&&acknowledgment.event_id!==lastAck){feedback(acknowledgment.message||"已保存 · 时间线与地图已同步",!!acknowledgment.assistant_status&&acknowledgment.assistant_status!=="success");lastAck=acknowledgment.event_id;}
 });

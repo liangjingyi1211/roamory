@@ -8,6 +8,7 @@ dependencies = [
   "streamlit>=1.35,<2",
   "python-dotenv>=1,<2",
   "pydantic>=2,<3",
+  "pillow>=10,<14",
 ]
 [dependency-groups]
 dev = ["pytest>=8,<10"]

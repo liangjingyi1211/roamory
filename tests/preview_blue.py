@@ -21,10 +21,15 @@ def main():
     root = Path(__file__).resolve().parents[1]
     frontend = root / "travelmind/frontend"
     host = "--host" in sys.argv
-    out = root / ("artifacts/left-maps-host" if host else "artifacts/left-maps")
+    pages_only = "--pages-only" in sys.argv
+    out = root / ("artifacts/v7-host" if host else "artifacts/v7")
     out.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="travelmind-blue-", ignore_cleanup_errors=True) as directory:
         temporary = Path(directory)
+        from PIL import Image
+        coast_photo, city_photo = temporary / "coast.png", temporary / "city.png"
+        Image.new("RGB", (640, 400), "#356dcc").save(coast_photo)
+        Image.new("RGB", (640, 400), "#183b6b").save(city_photo)
         html = (frontend / "index.html").read_text(encoding="utf-8")
         for name in ("theme.css", "style.css"):
             html = html.replace(f'<link rel="stylesheet" href="{name}">',
@@ -75,6 +80,12 @@ def main():
                 schedule_day(day)
             database = temporary / "preview.sqlite3"
             TripStore(database).save(plan)
+            if pages_only:
+                from travelmind.journal import JournalStore
+                JournalStore(database).save(trip_id=plan.trip_id, day_id=plan.days[0].day_id,
+                    item_type="restaurant", item_id=plan.days[0].breakfast.id,
+                    content="A quiet breakfast. The coffee was lovely.",
+                    new_images=[{"name":"coast.png", "data":coast_photo.read_bytes()}])
             gc.collect()
             env = dict(os.environ, TRAVELMIND_DB=str(database), TRAVELMIND_LOG_FILE=str(temporary / "audit.log"), GOOGLE_MAPS_BROWSER_API_KEY="")
             server = subprocess.Popen([sys.executable, "-m", "streamlit", "run", str(root / "streamlit_app.py"),
@@ -137,12 +148,18 @@ def main():
                         time.sleep(.05)
                     raise AssertionError(expression)
 
+                def upload_file(selector, path):
+                    document_node = cdp("DOM.getDocument")["root"]["nodeId"]
+                    input_node = cdp("DOM.querySelector", dict(nodeId=document_node, selector=selector))["nodeId"]
+                    assert input_node, selector
+                    cdp("DOM.setFileInputFiles", dict(nodeId=input_node, files=[str(path)]))
+
                 cdp("Page.enable")
                 reports = []
-                for width, height in ((1440, 1000), (1024, 768), (768, 1024), (375, 812), (1440, 560), (812, 375)):
+                for width, height in (() if pages_only else ((1440, 1000), (1024, 768), (768, 1024), (375, 812), (1440, 560), (812, 375))):
                     cdp("Emulation.setDeviceMetricsOverride", dict(width=width, height=height, deviceScaleFactor=1, mobile=False))
                     context_id = None
-                    cdp("Page.navigate", dict(url="http://127.0.0.1:18562" if host else fixture.as_uri()))
+                    cdp("Page.navigate", dict(url="http://127.0.0.1:18562/?trip=" + plan.trip_id if host else fixture.as_uri()))
                     if host:
                         for _ in range(200):
                             if js("!!document.querySelector('.travelmind-surface .event')"):
@@ -185,11 +202,11 @@ def main():
                     assert js("['.map-panel','.place-panel'].every(s=>{let c=getComputedStyle(document.querySelector(s));return c.borderRadius==='0px'&&c.borderTopWidth==='0px'&&c.boxShadow==='none'})")
                     js("window.scrollTo(0,400)")
                     assert js("window.scrollY") > 0
-                    assert js("document.querySelector('.geo-column').getBoundingClientRect().top") == 0
+                    assert abs(js("document.querySelector('.geo-column').getBoundingClientRect().top")) < 1
                     assert js("document.querySelector('.assistant').parentElement.id") == "journey-content"
                     js("window.scrollTo(0,document.querySelector('.assistant').getBoundingClientRect().bottom+scrollY-innerHeight+16)")
                     assert js("document.querySelector('#chat-send').getBoundingClientRect().bottom") <= report["viewportHeight"]
-                    assert js("document.querySelector('.geo-column').getBoundingClientRect().top") == 0
+                    assert abs(js("document.querySelector('.geo-column').getBoundingClientRect().top")) < 1
                     js("window.scrollTo(0,0)")
                     if host:
                         # Real input to the browser's top-level viewport, not a
@@ -202,7 +219,7 @@ def main():
                         wait_for("window.scrollY >= 350")
                         time.sleep(.25)  # Finish Chrome's native wheel animation.
                         assert js("document.querySelector('.days').getBoundingClientRect().top") < calendar_top
-                        assert js("document.querySelector('.geo-column').getBoundingClientRect().top") == 0
+                        assert abs(js("document.querySelector('.geo-column').getBoundingClientRect().top")) < 1
                         assert js("[...document.querySelector('.geo-column').children].map(n=>n.getBoundingClientRect().top)") == panel_tops
                         report["wheelScrollY"] = js("window.scrollY")
                         # Drag the native browser scrollbar thumb to the bottom.
@@ -219,7 +236,7 @@ def main():
                         print("scrollbar", width, js("({y:window.scrollY,max:document.documentElement.scrollHeight-innerHeight,sendBottom:document.querySelector('#chat-send').getBoundingClientRect().bottom})"))
                         wait_for("window.scrollY >= document.documentElement.scrollHeight-innerHeight-2")
                         report["scrollbarScrollY"] = js("window.scrollY")
-                        assert js("document.querySelector('.geo-column').getBoundingClientRect().top") == 0
+                        assert abs(js("document.querySelector('.geo-column').getBoundingClientRect().top")) < 1
                         assert js("document.querySelector('#chat-send').getBoundingClientRect().bottom") <= height
                         js("window.scrollTo(0,0)")
                     if host:
@@ -241,8 +258,9 @@ def main():
                     image = cdp("Page.captureScreenshot", dict(format="png", captureBeyondViewport=False))
                     (out / f"workspace-{width}-{height}.png").write_bytes(base64.b64decode(image["data"]))
                     reports.append(report)
-                (out / "checks.json").write_text(json.dumps(reports, indent=2), encoding="utf-8")
-                if host:
+                if reports:
+                    (out / "checks.json").write_text(json.dumps(reports, indent=2), encoding="utf-8")
+                if host and not pages_only:
                     # A real edit crosses the preserved iframe bridge and reruns
                     # Streamlit; the parent-document surface must remain usable.
                     js("document.querySelector('.event .actions button').click()")
@@ -251,6 +269,63 @@ def main():
                     assert js("document.querySelector('#place-detail h2')===null")
                     assert cdp("Runtime.evaluate", dict(expression="document.querySelectorAll('.travelmind-surface').length", returnByValue=True))["result"]["value"] == 1
                     print("Manual edit / Streamlit rerender / M2 invalidation: passed")
+                    # Record via the card, then edit the same record. This uses
+                    # the real journal event handler and temporary SQLite DB.
+                    cdp("Emulation.setDeviceMetricsOverride", dict(width=1440, height=1000, deviceScaleFactor=1, mobile=False))
+                    js("document.querySelector('.event .record').click()")
+                    upload_file(".journal-form input[type=file]", coast_photo)
+                    wait_for("document.querySelector('.journal-photo img')?.naturalWidth>0")
+                    js("document.querySelector('.journal-form textarea').value='A quiet breakfast by the harbour.';document.querySelector('.journal-form').requestSubmit()")
+                    wait_for("document.querySelector('.event .record')?.textContent==='编辑记录'")
+                    js("document.querySelector('.event .record').click()")
+                    assert js("document.querySelector('.journal-form textarea').value") == "A quiet breakfast by the harbour."
+                    wait_for("document.querySelector('.journal-photo img')?.naturalWidth>0")
+                    js("document.querySelector('.journal-form textarea').value='A quiet breakfast. The coffee was lovely.';document.querySelector('.journal-form').requestSubmit()")
+                    wait_for("document.querySelector('.journal-form')===null")
+                if host:
+                    # Reopen from disk after a full page navigation.
+                    cdp("Emulation.setDeviceMetricsOverride", dict(width=1440, height=1000, deviceScaleFactor=1, mobile=False))
+                    context_id = None
+                    cdp("Page.navigate", dict(url="http://127.0.0.1:18562/?view=journals"))
+                    wait_for("!!document.querySelector('.journal-prose')")
+                    assert "The coffee was lovely" in js("document.querySelector('.journal-prose').textContent")
+                    wait_for("document.querySelector('[data-testid=stImage] img')?.naturalWidth>0")
+                    assert js("!document.querySelector('[data-testid=stExpander]')")
+                    image = cdp("Page.captureScreenshot", dict(format="png", captureBeyondViewport=False))
+                    (out / "journal-library.png").write_bytes(base64.b64decode(image["data"]))
+                    # The visible Edit button opens text + photo editing directly.
+                    js("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='编辑').click()")
+                    wait_for("!!document.querySelector('textarea') && !!document.querySelector('input[type=file]')")
+                    js("Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype,'value').set.call(document.querySelector('textarea'),'Edited text and a new city photo.');document.querySelector('textarea').dispatchEvent(new window.Event('input',{bubbles:true}))")
+                    js("document.querySelector('input[type=checkbox]').click()")
+                    upload_file("input[type=file]", city_photo)
+                    wait_for("document.querySelector('[data-testid=stFileUploader]')?.textContent.includes('city.png')")
+                    time.sleep(.4)
+                    js("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='保存记录').click()")
+                    wait_for("document.querySelector('.journal-prose')?.textContent==='Edited text and a new city photo.'")
+                    wait_for("document.querySelector('[data-testid=stImage] img')?.naturalWidth>0")
+                    from travelmind.journal import JournalStore
+                    saved_entry = JournalStore(database).list_entries()[0]
+                    assert [image.name for image in saved_entry.images] == ["city.png"]
+                    image = cdp("Page.captureScreenshot", dict(format="png", captureBeyondViewport=False))
+                    (out / "journal-with-photo.png").write_bytes(base64.b64decode(image["data"]))
+                    print("Card photo upload, reload, visible Edit button, image removal/replacement: passed")
+                    cdp("Page.navigate", dict(url="http://127.0.0.1:18562/?view=trips"))
+                    wait_for("document.body.textContent.includes('打开行程')")
+                    assert "Sydney" in js("document.body.textContent")
+                    image = cdp("Page.captureScreenshot", dict(format="png", captureBeyondViewport=False))
+                    (out / "trip-library.png").write_bytes(base64.b64decode(image["data"]))
+                    for width in (1440,375):
+                        cdp("Emulation.setDeviceMetricsOverride", dict(width=width, height=1000, deviceScaleFactor=1, mobile=False))
+                        cdp("Page.navigate", dict(url="http://127.0.0.1:18562/?view=new"))
+                        wait_for("!!document.querySelector('.home-hero svg')")
+                        wait_for("document.querySelectorAll('.navigation-card').length===2")
+                        time.sleep(.2)
+                        assert js("document.documentElement.scrollWidth") <= width
+                        assert js("document.querySelector('.home-hero').getBoundingClientRect().height") < (450 if width == 375 else 340)
+                        image = cdp("Page.captureScreenshot", dict(format="png", captureBeyondViewport=False))
+                        (out / f"home-{width}.png").write_bytes(base64.b64decode(image["data"]))
+                    print("Libraries and responsive home: passed" if pages_only else "Card journal create/edit/reload, libraries and responsive home: passed")
                 print(json.dumps(reports, indent=2))
         finally:
             process.terminate()

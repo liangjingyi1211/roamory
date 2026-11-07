@@ -1,0 +1,128 @@
+[
+  {
+    "width": 1440,
+    "scrollWidth": 1430,
+    "cards": 7,
+    "brand": "rgb(24, 59, 107)",
+    "columns": "643.5px",
+    "chatHeight": 163.578125,
+    "documentHeight": 1758,
+    "viewportHeight": 1000,
+    "journeyHeight": 1758,
+    "journeyScrollHeight": 1758,
+    "wheelScrollY": 400,
+    "scrollbarScrollY": 758,
+    "host": {
+      "height": 1000,
+      "documentHeight": 1758,
+      "mainHeight": 1758,
+      "iframeHeight": 0,
+      "iframeBottom": 0
+    }
+  },
+  {
+    "width": 1024,
+    "scrollWidth": 1014,
+    "cards": 7,
+    "brand": "rgb(24, 59, 107)",
+    "columns": "456.297px",
+    "chatHeight": 163.578125,
+    "documentHeight": 2152,
+    "viewportHeight": 768,
+    "journeyHeight": 2152,
+    "journeyScrollHeight": 2152,
+    "wheelScrollY": 400,
+    "scrollbarScrollY": 1384,
+    "host": {
+      "height": 768,
+      "documentHeight": 2152,
+      "mainHeight": 2152,
+      "iframeHeight": 0,
+      "iframeBottom": 0
+    }
+  },
+  {
+    "width": 768,
+    "scrollWidth": 758,
+    "cards": 7,
+    "brand": "rgb(24, 59, 107)",
+    "columns": "397.047px 360.953px",
+    "chatHeight": 163.578125,
+    "documentHeight": 2540,
+    "viewportHeight": 1024,
+    "journeyHeight": 2090,
+    "journeyScrollHeight": 2090,
+    "wheelScrollY": 400,
+    "scrollbarScrollY": 1516,
+    "host": {
+      "height": 1024,
+      "documentHeight": 2540,
+      "mainHeight": 2540,
+      "iframeHeight": 0,
+      "iframeBottom": 0
+    }
+  },
+  {
+    "width": 375,
+    "scrollWidth": 365,
+    "cards": 7,
+    "brand": "rgb(24, 59, 107)",
+    "columns": "182.5px 182.5px",
+    "chatHeight": 151.578125,
+    "documentHeight": 2788,
+    "viewportHeight": 812,
+    "journeyHeight": 2463,
+    "journeyScrollHeight": 2463,
+    "wheelScrollY": 400,
+    "scrollbarScrollY": 1976,
+    "host": {
+      "height": 812,
+      "documentHeight": 2788,
+      "mainHeight": 2788,
+      "iframeHeight": 0,
+      "iframeBottom": 0
+    }
+  },
+  {
+    "width": 1440,
+    "scrollWidth": 1430,
+    "cards": 7,
+    "brand": "rgb(24, 59, 107)",
+    "columns": "643.5px",
+    "chatHeight": 163.578125,
+    "documentHeight": 1758,
+    "viewportHeight": 560,
+    "journeyHeight": 1758,
+    "journeyScrollHeight": 1758,
+    "wheelScrollY": 400,
+    "scrollbarScrollY": 1198,
+    "host": {
+      "height": 560,
+      "documentHeight": 1758,
+      "mainHeight": 1758,
+      "iframeHeight": 0,
+      "iframeBottom": 0
+    }
+  },
+  {
+    "width": 812,
+    "scrollWidth": 802,
+    "cards": 7,
+    "brand": "rgb(24, 59, 107)",
+    "columns": "420.094px 381.906px",
+    "chatHeight": 163.578125,
+    "documentHeight": 2255,
+    "viewportHeight": 375,
+    "journeyHeight": 2090,
+    "journeyScrollHeight": 2090,
+    "wheelScrollY": 400,
+    "scrollbarScrollY": 1880,
+    "host": {
+      "height": 375,
+      "documentHeight": 2255,
+      "mainHeight": 2255,
+      "iframeHeight": 0,
+      "iframeBottom": 0
+    }
+  }
+]

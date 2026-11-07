@@ -1,12 +1,11 @@
-"""V4 workspace and independent creation/history view on the existing service."""
+"""V7 home, personal libraries and the existing planning workspace."""
 import asyncio
-from datetime import date, timedelta
 from pathlib import Path
 from urllib.parse import urlencode
 import streamlit as st
-from travelmind.models import TripRequest, TripPreferences
-from travelmind.service import generate_plan
 from travelmind.storage import TripStore
+from travelmind.journal import JournalStore, apply_journal_event
+from travelmind.pages import render_home, render_trip_library, render_journal_library
 from travelmind.ui import workspace, apply_workspace_event
 from travelmind.assistant import assistant_edit
 from travelmind.agent import safe_error
@@ -22,45 +21,16 @@ active = st.query_params.get("trip")
 if active not in trip_ids:
     active = trip_ids[0] if trip_ids else None
 
-if st.query_params.get("view") == "new" or active is None:
-    st.title("规划新旅程")
-    st.caption("创建独立的新行程，已有旅程与修改都会保留。")
-    if active and st.button("返回当前行程"):
-        st.query_params["trip"] = active
-        st.query_params.pop("view", None)
-        st.rerun()
-    with st.form("new_trip"):
-        destination = st.text_input("目的地", "Sydney, Australia")
-        a, b = st.columns(2)
-        start = a.date_input("开始日期", date.today())
-        end = b.date_input("结束日期", date.today() + timedelta(days=2))
-        interests = st.text_input("旅行兴趣（逗号分隔）", "公园, 博物馆")
-        food = st.text_input("餐饮偏好（逗号分隔）")
-        pace = st.selectbox("旅行节奏", ["relaxed", "moderate", "intensive"], index=1)
-        notes = st.text_area("补充说明", placeholder="例如：第一天下午抵达，最后一天中午离开")
-        submitted = st.form_submit_button("创建行程", type="primary")
-    if submitted:
-        try:
-            split = lambda text: [x.strip() for x in text.replace("，", ",").split(",") if x.strip()]
-            request = TripRequest(destination=destination.strip(), start_date=start, end_date=end,
-                preferences=TripPreferences(interests=split(interests), food_preferences=split(food),
-                    travel_pace=pace, additional_notes=notes or None))
-            with st.spinner("正在规划每日景点、附近餐饮与住宿…"):
-                plan, trace = asyncio.run(generate_plan(request))
-                store.save(plan)
-            st.query_params["trip"] = plan.trip_id
-            st.query_params.pop("view", None)
-            st.session_state["trace"] = trace
-            st.rerun()
-        except Exception as exc:
-            st.error("创建失败，输入已保留：" + safe_error(exc))
-    if trips:
-        st.subheader("最近旅程")
-        for trip_id, title in trips:
-            if st.button(title, key="open-trip:" + trip_id):
-                st.query_params["trip"] = trip_id
-                st.query_params.pop("view", None)
-                st.rerun()
+journals = JournalStore(store.path)
+view = st.query_params.get("view") or ("trip" if st.query_params.get("trip") in trip_ids else "new")
+if view == "trips":
+    render_trip_library(store, trips)
+    st.stop()
+if view == "journals":
+    render_journal_library(journals)
+    st.stop()
+if view != "trip" or active is None:
+    render_home(store, trips, journals)
     st.stop()
 
 st.query_params["trip"] = active
@@ -74,7 +44,10 @@ if isinstance(event, dict) and event.get("event_id") and event["event_id"] != st
     try:
         if event.get("trip_id") != active:
             raise ValueError("请求不属于当前旅程")
-        if event.get("kind") == "assistant":
+        if event.get("kind") == "journal":
+            apply_journal_event(journals, active, event)
+            acknowledgment = {"event_id": event["event_id"], "kind": "journal", "success": True, "message": "旅行记录已保存"}
+        elif event.get("kind") == "assistant":
             message = event.get("message", "")
             response = asyncio.run(assistant_edit(store, active, message,
                 selected_day_id=event.get("selected_day_id"), selected_place_ref=event.get("selected_place_ref"),
