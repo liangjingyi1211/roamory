@@ -8,22 +8,22 @@ import pytest
 from streamlit.testing.v1 import AppTest
 from PIL import Image
 
-from travelmind.journal import JournalStore, apply_journal_event
-from travelmind.models import Activity, Hotel, Restaurant, TripRequest, initialize_plan
-from travelmind.storage import TripStore
+from roamory.journal import JournalStore, apply_journal_event
+from roamory.models import Activity, Hotel, Restaurant, TripRequest, initialize_plan
+from roamory.storage import TripStore
 
 
 @pytest.fixture
 def journal_setup(tmp_path, monkeypatch):
     path = tmp_path / "v7.sqlite3"
-    monkeypatch.setenv("TRAVELMIND_DB", str(path))
-    monkeypatch.setattr("travelmind.places.audit", lambda *a, **k: None)
-    monkeypatch.setattr("travelmind.agent.audit", lambda *a, **k: None)
+    monkeypatch.setenv("ROAMORY_DB", str(path))
+    monkeypatch.setattr("roamory.places.audit", lambda *a, **k: None)
+    monkeypatch.setattr("roamory.agent.audit", lambda *a, **k: None)
     def forbidden(*args, **kwargs):
         raise AssertionError("journal must not call agents or Places")
-    monkeypatch.setattr("travelmind.service.generate_plan", forbidden)
-    monkeypatch.setattr("travelmind.places.client.search", forbidden)
-    monkeypatch.setattr("travelmind.places.client.search_nearby", forbidden)
+    monkeypatch.setattr("roamory.service.generate_plan", forbidden)
+    monkeypatch.setattr("roamory.places.client.search", forbidden)
+    monkeypatch.setattr("roamory.places.client.search_nearby", forbidden)
     plan = initialize_plan(TripRequest(destination="Kyoto", start_date=date(2027, 4, 1), end_date=date(2027, 4, 2)))
     plan.days[0].activities = [Activity(name="Garden")]
     plan.days[0].lunch = Restaurant(name="Lunch Cafe")
@@ -119,7 +119,7 @@ def test_home_library_and_journal_edit(journal_setup, monkeypatch):
     html = "\n".join(m.value for m in home.markdown)
     assert 'home-hero' in html and '<svg' in html and 'view=journals' in html and 'view=trips' in html
     assert any(button.label == "创建行程" for button in home.button)
-    monkeypatch.setattr("travelmind.ui.workspace", lambda plan, ack, conversation=None: None)
+    monkeypatch.setattr("roamory.ui.workspace", lambda plan, ack, conversation=None: None)
     library = AppTest.from_file(APP)
     library.query_params["view"] = "trips"
     library.run(timeout=20)
@@ -144,7 +144,7 @@ def test_workspace_journal_event_does_not_mutate_trip(journal_setup, monkeypatch
     store, plan, journals = journal_setup
     before = raw_trip(store, plan.trip_id)
     events = [{"event_id": "journal-save", "kind": "journal", **note_args(plan), "content": "From the card", "revision": None}]
-    monkeypatch.setattr("travelmind.ui.workspace", lambda plan, ack, conversation=None: events.pop() if events else None)
+    monkeypatch.setattr("roamory.ui.workspace", lambda plan, ack, conversation=None: events.pop() if events else None)
     app = AppTest.from_file(APP)
     app.query_params["trip"] = plan.trip_id
     app.run(timeout=20)
@@ -158,7 +158,7 @@ def test_home_creation_failure_retains_input_then_uses_existing_service(journal_
     before = raw_trip(store, existing.trip_id)
     async def failed(request):
         raise ValueError("temporary planning failure")
-    monkeypatch.setattr("travelmind.service.generate_plan", failed)
+    monkeypatch.setattr("roamory.service.generate_plan", failed)
     home = AppTest.from_file(APP).run(timeout=20)
     home.text_input[0].set_value("Lisbon, Portugal")
     home.text_input[1].set_value("architecture, coast")
@@ -170,8 +170,8 @@ def test_home_creation_failure_retains_input_then_uses_existing_service(journal_
     async def successful(request):
         captured.append(request)
         return initialize_plan(request), ["activity_agent", "food_agent", "hotel_agent"]
-    monkeypatch.setattr("travelmind.service.generate_plan", successful)
-    monkeypatch.setattr("travelmind.ui.workspace", lambda plan, ack, conversation=None: None)
+    monkeypatch.setattr("roamory.service.generate_plan", successful)
+    monkeypatch.setattr("roamory.ui.workspace", lambda plan, ack, conversation=None: None)
     home.button[0].click().run(timeout=20)
     assert not home.exception
     created = store.get(home.query_params["trip"])

@@ -1,4 +1,4 @@
-# TravelMind Premium Blue
+# Roamory Premium Blue
 
 本次设计替代 V5 初版的绿色主题，仅调整前端样式与信息展示。Agent、Coordinator、API、地图数据流及业务逻辑保持不变。
 
@@ -6,7 +6,7 @@
 
 使用已安装的 UI/UX Pro Max，重新读取 Skill 并执行 `professional SaaS minimal blue` 设计系统搜索。根据用户明确要求，采用克制的蓝色、纯色表面与字体层级，未采用搜索输出中的玻璃背景或营销页结构。
 
-唯一主题来源为 `travelmind/frontend/theme.css`。静态组件直接加载该文件，Streamlit 外层读取同一文件并注入样式，不再各自维护颜色副本。
+唯一主题来源为 `roamory/frontend/theme.css`。静态组件直接加载该文件，Streamlit 外层读取同一文件并注入样式，不再各自维护颜色副本。
 
 | 角色 | 颜色 |
 | --- | --- |

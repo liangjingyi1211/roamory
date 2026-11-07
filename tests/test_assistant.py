@@ -3,15 +3,15 @@ import asyncio
 import json
 import sqlite3
 import pytest
-from travelmind import assistant as ai
-from travelmind.models import TripRequest, Restaurant, Activity, Hotel, initialize_plan
-from travelmind.storage import TripStore, VersionConflict
-from travelmind.agent import FoodOutput, ActivityOutput, HotelOutput
+from roamory import assistant as ai
+from roamory.models import TripRequest, Restaurant, Activity, Hotel, initialize_plan
+from roamory.storage import TripStore, VersionConflict
+from roamory.agent import FoodOutput, ActivityOutput, HotelOutput
 
 @pytest.fixture
 def saved(tmp_path, monkeypatch):
     monkeypatch.setattr(ai, "audit", lambda *a, **kw: None)
-    monkeypatch.setattr("travelmind.agent.audit", lambda *a, **kw: None)
+    monkeypatch.setattr("roamory.agent.audit", lambda *a, **kw: None)
     ai._last_request.clear()
     store = TripStore(tmp_path / "v4.sqlite3")
     plan = initialize_plan(TripRequest(destination="Sydney, Australia", start_date="2027-04-01", end_date="2027-04-03"))

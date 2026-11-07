@@ -19,12 +19,12 @@ from websockets.sync.client import connect
 
 def main():
     root = Path(__file__).resolve().parents[1]
-    frontend = root / "travelmind/frontend"
+    frontend = root / "roamory/frontend"
     host = "--host" in sys.argv
     pages_only = "--pages-only" in sys.argv
     out = root / ("artifacts/v7-host" if host else "artifacts/v7")
     out.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="travelmind-blue-", ignore_cleanup_errors=True) as directory:
+    with tempfile.TemporaryDirectory(prefix="roamory-blue-", ignore_cleanup_errors=True) as directory:
         temporary = Path(directory)
         from PIL import Image
         coast_photo, city_photo = temporary / "coast.png", temporary / "city.png"
@@ -66,9 +66,9 @@ def main():
             # Use a throwaway database; never edit the user's stored journeys.
             sys.path.insert(0, str(root))
             from datetime import date
-            from travelmind.models import Activity, Hotel, Restaurant, TripRequest, initialize_plan
-            from travelmind.storage import TripStore
-            from travelmind.timeline import schedule_day
+            from roamory.models import Activity, Hotel, Restaurant, TripRequest, initialize_plan
+            from roamory.storage import TripStore
+            from roamory.timeline import schedule_day
             plan = initialize_plan(TripRequest(destination="Sydney", start_date=date(2026, 11, 8), end_date=date(2026, 11, 10)))
             for day in plan.days:
                 day.activities = [Activity(name=name, address="Sydney Harbour") for name in ("Harbour Museum", "Botanic Gardens", "Evening Gallery")]
@@ -81,13 +81,13 @@ def main():
             database = temporary / "preview.sqlite3"
             TripStore(database).save(plan)
             if pages_only:
-                from travelmind.journal import JournalStore
+                from roamory.journal import JournalStore
                 JournalStore(database).save(trip_id=plan.trip_id, day_id=plan.days[0].day_id,
                     item_type="restaurant", item_id=plan.days[0].breakfast.id,
                     content="A quiet breakfast. The coffee was lovely.",
                     new_images=[{"name":"coast.png", "data":coast_photo.read_bytes()}])
             gc.collect()
-            env = dict(os.environ, TRAVELMIND_DB=str(database), TRAVELMIND_LOG_FILE=str(temporary / "audit.log"), GOOGLE_MAPS_BROWSER_API_KEY="")
+            env = dict(os.environ, ROAMORY_DB=str(database), ROAMORY_LOG_FILE=str(temporary / "audit.log"), GOOGLE_MAPS_BROWSER_API_KEY="")
             server = subprocess.Popen([sys.executable, "-m", "streamlit", "run", str(root / "streamlit_app.py"),
                 "--server.port=18562", "--server.address=127.0.0.1", "--server.headless=true", "--browser.gatherUsageStats=false"],
                 env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW)
@@ -132,7 +132,7 @@ def main():
 
                 def js(expression):
                     if context_id and host:
-                        expression = "((window)=>{const native=window.document,root=native.querySelector('.travelmind-surface'),document={querySelector:s=>root.querySelector(s),querySelectorAll:s=>root.querySelectorAll(s),documentElement:native.documentElement},innerWidth=window.innerWidth,innerHeight=window.innerHeight,scrollY=window.scrollY;return eval(" + json.dumps(expression) + ");})(window.parent)"
+                        expression = "((window)=>{const native=window.document,root=native.querySelector('.roamory-surface'),document={querySelector:s=>root.querySelector(s),querySelectorAll:s=>root.querySelectorAll(s),documentElement:native.documentElement},innerWidth=window.innerWidth,innerHeight=window.innerHeight,scrollY=window.scrollY;return eval(" + json.dumps(expression) + ");})(window.parent)"
                     params = dict(expression=expression, returnByValue=True)
                     if context_id:
                         params["contextId"] = context_id
@@ -162,7 +162,7 @@ def main():
                     cdp("Page.navigate", dict(url="http://127.0.0.1:18562/?trip=" + plan.trip_id if host else fixture.as_uri()))
                     if host:
                         for _ in range(200):
-                            if js("!!document.querySelector('.travelmind-surface .event')"):
+                            if js("!!document.querySelector('.roamory-surface .event')"):
                                 break
                             time.sleep(.1)
                         parent = js("({height:innerHeight, documentHeight:document.documentElement.scrollHeight, mainHeight:document.querySelector('[data-testid=stMain]').scrollHeight, iframeHeight:document.querySelector('iframe').getBoundingClientRect().height, iframeBottom:document.querySelector('iframe').getBoundingClientRect().bottom})")
@@ -267,7 +267,7 @@ def main():
                     js("document.querySelector('.edit-form input').value='Edited Breakfast Cafe';document.querySelector('.edit-form').requestSubmit()")
                     wait_for("document.querySelector('.event .title')?.textContent==='Edited Breakfast Cafe'")
                     assert js("document.querySelector('#place-detail h2')===null")
-                    assert cdp("Runtime.evaluate", dict(expression="document.querySelectorAll('.travelmind-surface').length", returnByValue=True))["result"]["value"] == 1
+                    assert cdp("Runtime.evaluate", dict(expression="document.querySelectorAll('.roamory-surface').length", returnByValue=True))["result"]["value"] == 1
                     print("Manual edit / Streamlit rerender / M2 invalidation: passed")
                     # Record via the card, then edit the same record. This uses
                     # the real journal event handler and temporary SQLite DB.
@@ -288,6 +288,8 @@ def main():
                     context_id = None
                     cdp("Page.navigate", dict(url="http://127.0.0.1:18562/?view=journals"))
                     wait_for("!!document.querySelector('.journal-prose')")
+                    assert js("document.title") == "Roamory"
+                    assert js("document.querySelector('.site-brand').textContent") == "Roamory"
                     assert "The coffee was lovely" in js("document.querySelector('.journal-prose').textContent")
                     wait_for("document.querySelector('[data-testid=stImage] img')?.naturalWidth>0")
                     assert js("!document.querySelector('[data-testid=stExpander]')")
@@ -304,7 +306,7 @@ def main():
                     js("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='保存记录').click()")
                     wait_for("document.querySelector('.journal-prose')?.textContent==='Edited text and a new city photo.'")
                     wait_for("document.querySelector('[data-testid=stImage] img')?.naturalWidth>0")
-                    from travelmind.journal import JournalStore
+                    from roamory.journal import JournalStore
                     saved_entry = JournalStore(database).list_entries()[0]
                     assert [image.name for image in saved_entry.images] == ["city.png"]
                     image = cdp("Page.captureScreenshot", dict(format="png", captureBeyondViewport=False))
@@ -320,6 +322,8 @@ def main():
                         cdp("Page.navigate", dict(url="http://127.0.0.1:18562/?view=new"))
                         wait_for("!!document.querySelector('.home-hero svg')")
                         wait_for("document.querySelectorAll('.navigation-card').length===2")
+                        assert js("document.title") == "Roamory"
+                        assert js("document.querySelector('.site-brand').textContent") == "Roamory"
                         time.sleep(.2)
                         assert js("document.documentElement.scrollWidth") <= width
                         assert js("document.querySelector('.home-hero').getBoundingClientRect().height") < (450 if width == 375 else 340)

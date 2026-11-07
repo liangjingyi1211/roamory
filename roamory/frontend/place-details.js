@@ -1,7 +1,7 @@
 "use strict";
 // Only selected-place details are fetched. No persistent cache, scraping or iframe.
-window.TravelMindDetails = (() => {
-  const surfaceDocument = window.TravelMindSurface?.document || document;
+window.RoamoryDetails = (() => {
+  const surfaceDocument = window.RoamorySurface?.document || document;
   const node=(tag,text,cls)=>{const n=surfaceDocument.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;};
   let sequence=0, selectedKey=null, currentResult=null, currentSelection=null;
   const inflight=new Map();

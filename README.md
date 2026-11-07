@@ -1,4 +1,4 @@
-# TravelMind V7
+# Roamory V7
 
 Google ADK + Streamlit + SQLite 旅行规划器。保留三个专家和 V3 完整生成流程，新增仅支持替换、增加、单日重新规划的 AI 局部修改。工作台提供每日时间线、M1 地点地图与 M2 官方地点详情，左下角新建入口提供独立创建与历史旅程视图。地图不提供路线、交通方式、ETA 或交通费用。
 
@@ -16,6 +16,10 @@ uv run --env-file .env streamlit run streamlit_app.py
 ```
 
 打开 http://localhost:8501。继续使用已有的 `GOOGLE_API_KEY`、`ADK_MODEL` 和后端 `GOOGLE_MAPS_API_KEY`；开发过程中未修改实际密钥。
+
+Python 包现为 `roamory`（例如 `from roamory.storage import TripStore`），项目元数据名称为 `roamory`。已有运行进程需重启以加载新包；同源组件会以 `roamory.ui.roamory_workspace` 注册，页面标题与文字 Logo 均为 Roamory。部署继续使用上述 Streamlit 启动命令；本仓库没有项目级 package.json、Dockerfile 或托管平台配置。
+
+重命名兼容说明见 [更名记录](ROAMORY_RENAME.md)。新环境使用 `ROAMORY_DB`、`ROAMORY_LOG_FILE`；旧的 `TRAVELMIND_DB`、`TRAVELMIND_LOG_FILE` 仍可读取，新变量优先。没有显式数据库配置时，优先使用已存在的 `data/roamory.sqlite3`，否则自动复用历史 `data/travelmind.sqlite3`；全新安装默认创建前者。不会自动移动、合并或清空数据库，也不会改写历史日记内容。
 
 交互地图需要独立的 **`GOOGLE_MAPS_BROWSER_API_KEY`**：
 
@@ -120,35 +124,35 @@ V6 已移除整段旅行费用估算：不生成总额、区间或类别小计�
 
 当前桌面工作区为左右两栏：左侧上 M1、下 M2，使用 `position:sticky; top:0` 保持可见；右侧依次为横向日期、每日行程和 AI 助手，使用浏览器顶层 `window/document` 正常纵向滚动。小屏恢复顶部并排地图，避免行程过窄。同源组件将已有 DOM 呈现到主文档，原 iframe 仅保留事件通信，不承担页面滚动。无独立旅行大标题或 Timeline 内部滚动条；M2 与展开的聊天记录按内容需要内部滚动。蓝色主题及原有地图、手动编辑和三意图聊天功能保留。布局细节见 [Sticky 布局说明](STICKY_LAYOUT.md)。
 
-默认库为 `data/travelmind.sqlite3`，可用 `TRAVELMIND_DB` 指定。页面刷新从 SQLite 恢复，日期选择仅保存在浏览器会话。适用于本机单用户，未提供账号隔离；部署请使用持久化磁盘。日志为 `data/backend.log`（可用 `TRAVELMIND_LOG_FILE` 修改），不记录密钥；测试通过 fixture 隔离审计，避免污染用户运行日志。
+默认库为 `data/roamory.sqlite3`，可用 `ROAMORY_DB` 指定。页面刷新从 SQLite 恢复，日期选择仅保存在浏览器会话。适用于本机单用户，未提供账号隔离；部署请使用持久化磁盘。日志为 `data/backend.log`（可用 `ROAMORY_LOG_FILE` 修改），不记录密钥；测试通过 fixture 隔离审计，避免污染用户运行日志。
 
 ## 文件与验证
 
 | 文件 | 主要职责 |
 |---|---|
-| `travelmind/agent.py` | 三专家分阶段调度、按日动态检索和候选校验 |
-| `travelmind/places.py` | Text Search/Nearby Search、地域复核、缓存 |
-| `travelmind/models.py` | V2 契约 + TimelineItem、引用与时间约束 |
-| `travelmind/timeline.py` | 编排、排序、冲突检测、迁移、当日营业时间 |
-| `travelmind/storage.py` | SQLite 局部事务编辑、时间权威同步 |
-| `travelmind/ui.py` | 浏览器密钥隔离、视图数据和编辑事件桥接 |
-| `travelmind/pages.py` | Hero 首页、已有行程库、旅行日记库与编辑 |
-| `travelmind/journal.py` | 独立日记模型、SQLite 读写、地点关联与并发版本保护 |
-| `travelmind/assistant.py` | 三意图结构化解析、目标解析、专家局部调度、受限补丁与回滚 |
-| `travelmind/frontend/` | 日期选择、时间线、编辑表单、Google Maps 生命周期 |
+| `roamory/agent.py` | 三专家分阶段调度、按日动态检索和候选校验 |
+| `roamory/places.py` | Text Search/Nearby Search、地域复核、缓存 |
+| `roamory/models.py` | V2 契约 + TimelineItem、引用与时间约束 |
+| `roamory/timeline.py` | 编排、排序、冲突检测、迁移、当日营业时间 |
+| `roamory/storage.py` | SQLite 局部事务编辑、时间权威同步 |
+| `roamory/ui.py` | 浏览器密钥隔离、视图数据和编辑事件桥接 |
+| `roamory/pages.py` | Hero 首页、已有行程库、旅行日记库与编辑 |
+| `roamory/journal.py` | 独立日记模型、SQLite 读写、地点关联与并发版本保护 |
+| `roamory/assistant.py` | 三意图结构化解析、目标解析、专家局部调度、受限补丁与回滚 |
+| `roamory/frontend/` | 日期选择、时间线、编辑表单、Google Maps 生命周期 |
 | `streamlit_app.py` | 页面路由、工作区挂载、编辑与日记事件分流 |
 | `tests/test_tools.py`、`tests/test_assistant.py` | 生成与编辑回归、V4 范围保护、并发与迁移 |
 | `tests/test_journal.py` | 日记持久化、归属校验、旧数据与首页创建/导航回归 |
 
 ```powershell
 uv run python -m pytest -q
-uv run python -m compileall -q travelmind streamlit_app.py
-node --check travelmind/frontend/app.js
-node --check travelmind/frontend/place-details.js
+uv run python -m compileall -q roamory streamlit_app.py
+node --check roamory/frontend/app.js
+node --check roamory/frontend/place-details.js
 node --test --experimental-test-isolation=none tests/frontend_workspace.test.cjs
 ```
 
-静态组件无需 npm 构建。当前验证结果：30 项 Python 测试、6 项前端交互测试通过；Python 编译、JavaScript 语法和 Git 差异检查通过。Chrome 使用临时数据库验证六组尺寸下的原生主窗口滚动、侧栏地图、日期切换、地点编辑与日记新增/编辑/整页重读，以及桌面和手机首页、行程库和日记库。实际浏览器上传图片后，已验证卡片预览、保存重读、日记图片展示，以及通过独立编辑按钮修改文字和替换图片。
+静态组件无需 npm 构建。当前验证结果：34 项 Python 测试、6 项前端交互测试通过；Python 编译、JavaScript 语法和 Git 差异检查通过。Chrome 使用临时数据库验证六组尺寸下的原生主窗口滚动、侧栏地图、日期切换、地点编辑与日记新增/编辑/整页重读，以及桌面和手机首页、行程库和日记库。实际浏览器上传图片后，已验证卡片预览、保存重读、日记图片展示，以及通过独立编辑按钮修改文字和替换图片。
 
 浏览器复验：`.venv/Scripts/python.exe tests/preview_blue.py --host`；仅检查首页和列表可追加 `--pages-only`。截图在 `artifacts/v7-host/`。本轮使用合成行程、离线地图与受控服务替身，未重新执行真实 Gemini/Places 在线调用，不把这些测试视为在线权限验证。
 

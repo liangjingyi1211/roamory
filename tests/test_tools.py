@@ -6,18 +6,18 @@ from google.adk.agents import LlmAgent
 from google.adk.events import Event, EventActions
 from google.genai import types
 from streamlit.testing.v1 import AppTest
-from travelmind.tools import count_nights
-from travelmind.models import TripRequest, TripPlan, Activity, Hotel, Restaurant, initialize_plan
-from travelmind.storage import TripStore
-from travelmind.agent import FoodOutput, merge_recommendations
-from travelmind.places import PlacesClient, PlacesError, opening_hours, within_destination
-from travelmind.timeline import schedule_day, sync_day, opening_for_date
-from travelmind.ui import workspace_payload, apply_workspace_event, browser_map_config
+from roamory.tools import count_nights
+from roamory.models import TripRequest, TripPlan, Activity, Hotel, Restaurant, initialize_plan
+from roamory.storage import TripStore
+from roamory.agent import FoodOutput, merge_recommendations
+from roamory.places import PlacesClient, PlacesError, opening_hours, within_destination
+from roamory.timeline import schedule_day, sync_day, opening_for_date
+from roamory.ui import workspace_payload, apply_workspace_event, browser_map_config
 
 @pytest.fixture(autouse=True)
 def isolate_audit(monkeypatch):
-    monkeypatch.setattr("travelmind.agent.audit", lambda *args, **kwargs: None)
-    monkeypatch.setattr("travelmind.places.audit", lambda *args, **kwargs: None)
+    monkeypatch.setattr("roamory.agent.audit", lambda *args, **kwargs: None)
+    monkeypatch.setattr("roamory.places.audit", lambda *args, **kwargs: None)
 
 def make_plan():
     return initialize_plan(TripRequest(destination="Tokyo", start_date=date(2027, 4, 1), end_date=date(2027, 4, 3)))
@@ -69,12 +69,12 @@ def test_dates_and_verification():
 
 def test_persistent_edits_and_page(tmp_path, monkeypatch):
     path = tmp_path / "trip.sqlite3"
-    monkeypatch.setenv("TRAVELMIND_DB", str(path))
+    monkeypatch.setenv("ROAMORY_DB", str(path))
     def forbidden(*args, **kwargs):
         raise AssertionError("editing must not invoke Places or agents")
-    monkeypatch.setattr("travelmind.places.client.search", forbidden)
-    monkeypatch.setattr("travelmind.places.client.search_nearby", forbidden)
-    monkeypatch.setattr("travelmind.service.generate_plan", forbidden)
+    monkeypatch.setattr("roamory.places.client.search", forbidden)
+    monkeypatch.setattr("roamory.places.client.search_nearby", forbidden)
+    monkeypatch.setattr("roamory.service.generate_plan", forbidden)
     store, plan = TripStore(), make_plan()
     store.save(plan)
     unchanged_day = store.get(plan.trip_id).days[1].model_dump()
@@ -93,7 +93,7 @@ def test_persistent_edits_and_page(tmp_path, monkeypatch):
     assert store.get(plan.trip_id).days[0].lunch.name == "手动餐厅"
     events = [{"event_id": "test-save", "trip_id": plan.trip_id, "day_id": day.day_id,
         "slot": "breakfast", "action": "save", "arguments": {"name": "页面新增早餐"}}]
-    monkeypatch.setattr("travelmind.ui.workspace", lambda plan, ack, conversation=None: events.pop() if events else None)
+    monkeypatch.setattr("roamory.ui.workspace", lambda plan, ack, conversation=None: events.pop() if events else None)
     app = AppTest.from_file(Path(__file__).resolve().parents[1] / "streamlit_app.py")
     app.query_params["trip"] = plan.trip_id
     app.run(timeout=20)
@@ -114,12 +114,12 @@ def test_persistent_edits_and_page(tmp_path, monkeypatch):
 
 def test_coordinator_flow(monkeypatch):
     import asyncio
-    from travelmind.service import generate_plan
+    from roamory.service import generate_plan
     rows = [{"id": f"a{i}", "displayName": {"text": f"Activity {i}"},
         "location": {"latitude": 35 + i, "longitude": 139}, "types": ["tourist_attraction"]} for i in range(3)]
     def search(destination, kind, preferences):
         return rows
-    monkeypatch.setattr("travelmind.agent.client.search", search)
+    monkeypatch.setattr("roamory.agent.client.search", search)
     calls = []
     searches = []
     def nearby(destination, kind, latitude, longitude, radius):
@@ -127,7 +127,7 @@ def test_coordinator_flow(monkeypatch):
         searches.append((kind, latitude, radius))
         key = ("r" if kind == "restaurant" else "h") + str(int(latitude - 35))
         return [{"id": key, "displayName": {"text": key}, "location": {"latitude": latitude, "longitude": longitude}}]
-    monkeypatch.setattr("travelmind.agent.client.search_nearby", nearby)
+    monkeypatch.setattr("roamory.agent.client.search_nearby", nearby)
     async def fake_run(self, ctx):
         calls.append(self.name)
         if self.name == "activity_agent":
@@ -152,7 +152,7 @@ def test_coordinator_flow(monkeypatch):
         if kind == "restaurant":
             raise PlacesError("explicit API failure")
         return nearby(destination, kind, latitude, longitude, radius)
-    monkeypatch.setattr("travelmind.agent.client.search_nearby", failing_food)
+    monkeypatch.setattr("roamory.agent.client.search_nearby", failing_food)
     plan, _ = asyncio.run(generate_plan(TripRequest(destination="Tokyo", start_date="2027-04-01", end_date="2027-04-03")))
     assert plan.days[0].lunch is None and plan.days[0].activities
     assert any("explicit API failure" in note for note in plan.days[0].notes)

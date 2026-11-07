@@ -23,7 +23,7 @@ def open_trip(trip_id):
 
 
 def page_navigation():
-    st.markdown('''<nav class="site-nav" aria-label="主要导航"><a class="site-brand" href="?view=new" target="_self">TravelMind</a>
+    st.markdown('''<nav class="site-nav" aria-label="主要导航"><a class="site-brand" href="?view=new" target="_self">Roamory</a>
       <div><a href="?view=new" target="_self">规划旅程</a><a href="?view=trips" target="_self">我的行程</a>
       <a href="?view=journals" target="_self">我的旅行日记</a></div></nav>''', unsafe_allow_html=True)
 

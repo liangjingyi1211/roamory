@@ -209,5 +209,5 @@ def merge_recommendations(plan, role, output, candidates):
             if row:
                 day.hotel = Hotel(**place_fields(row), rating=row.get("rating"))
 
-root_agent = TravelCoordinator(name="travelmind", description="V3 activity-dependent search and daily timeline coordinator; input TripRequest JSON",
+root_agent = TravelCoordinator(name="roamory", description="V3 activity-dependent search and daily timeline coordinator; input TripRequest JSON",
     sub_agents=[activity_agent, food_agent, hotel_agent])

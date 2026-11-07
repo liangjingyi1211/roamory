@@ -1,7 +1,7 @@
 "use strict";
 // Keep Streamlit's iframe as the event bridge, but render into the same-origin
 // parent document so native window scrolling and CSS sticky share one viewport.
-window.TravelMindSurface = (() => {
+window.RoamorySurface = (() => {
   const localDocument = document;
   const frame = window.frameElement;
   const scrollInset = root => {
@@ -14,14 +14,14 @@ window.TravelMindSurface = (() => {
   }
   const parentDocument = frame.ownerDocument;
   const host = parentDocument.createElement("div");
-  host.className = "travelmind-surface";
+  host.className = "roamory-surface";
   // Scope the existing stylesheet to this surface. Keep Maps in light DOM so
   // the SDK's own .gm-* styles and controls work in the parent document too.
   const scopedRules = rules => [...rules].map(rule=>{
     if (rule.selectorText) {
       const selectors=rule.selectorText.split(",").map(selector=>selector.trim())
         .filter(selector=>selector!=="html"&&selector!=="body")
-        .map(selector=>selector===":root"?".travelmind-surface":`.travelmind-surface ${selector}`);
+        .map(selector=>selector===":root"?".roamory-surface":`.roamory-surface ${selector}`);
       return selectors.length?`${selectors.join(",")} {${rule.style.cssText}}`:"";
     }
     if (rule.cssRules) return `${rule.cssText.slice(0,rule.cssText.indexOf("{"))}{${scopedRules(rule.cssRules)}}`;
@@ -35,14 +35,14 @@ window.TravelMindSurface = (() => {
   const skip = localDocument.querySelector(".skip-link");
   const root = localDocument.querySelector(".app-shell");
   host.append(skip, root);
-  const previous = frame.parentElement.querySelector(":scope > .travelmind-surface");
+  const previous = frame.parentElement.querySelector(":scope > .roamory-surface");
   if (previous) previous.replaceWith(host); else frame.after(host);
-  frame.classList.add("travelmind-component-frame");
+  frame.classList.add("roamory-component-frame");
   frame.setAttribute("aria-hidden", "true");
   frame.setAttribute("tabindex", "-1");
   const refreshInset = () => {
     const inset = scrollInset(host);
-    parentDocument.documentElement.style.setProperty("--travelmind-map-inset", `${inset}px`);
+    parentDocument.documentElement.style.setProperty("--roamory-map-inset", `${inset}px`);
   };
   // Google Maps may inject styles into the iframe where the SDK was loaded.
   // Mirror those late styles into the document containing the actual map.
@@ -64,7 +64,7 @@ window.TravelMindSurface = (() => {
       observer.disconnect();
       sdkObserver.disconnect();
       for (const style of sdkStyles.values()) style.remove();
-      if (!parentDocument.querySelector(".travelmind-surface")) parentDocument.documentElement.style.removeProperty("--travelmind-map-inset");
+      if (!parentDocument.querySelector(".roamory-surface")) parentDocument.documentElement.style.removeProperty("--roamory-map-inset");
     }
   });
   observer.observe(parentDocument.body, {childList:true, subtree:true});

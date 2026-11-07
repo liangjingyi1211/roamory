@@ -25,9 +25,9 @@ function setup() {
   const parent={postMessage:value=>sent.push(value)};
   const context=vm.createContext({document,window:{parent,innerHeight:800,scrollBy:options=>scrollRequests.push(options),addEventListener:(name,fn)=>{listeners[name]=fn;},matchMedia:()=>({matches:true})},
     ResizeObserver:class {observe(){}},crypto:{randomUUID:()=> 'event-1'},
-    TravelMindDetails:{select:(...args)=>selections.push(args),clear(){}},sessionStorage:{setItem(){}},
+    RoamoryDetails:{select:(...args)=>selections.push(args),clear(){}},sessionStorage:{setItem(){}},
     URL,URLSearchParams,setTimeout,console});
-  vm.runInContext(fs.readFileSync(path.join(__dirname,'../travelmind/frontend/app.js'),'utf8'),context);
+  vm.runInContext(fs.readFileSync(path.join(__dirname,'../roamory/frontend/app.js'),'utf8'),context);
   vm.runInContext(`
     const place={id:'p1',name:'Museum',address:'Harbour Road',latitude:null,longitude:null};
     const day={day_id:'d1',day_index:1,date:'2026-11-07',title:'Harbour day',places:{p1:place},

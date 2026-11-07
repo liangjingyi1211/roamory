@@ -1,5 +1,5 @@
 "use strict";
-const surface = window.TravelMindSurface;
+const surface = window.RoamorySurface;
 const surfaceDocument = surface?.document || document;
 const surfaceView = surface?.view || window;
 // Static Streamlit component protocol; no npm bundle, no backend credential.
@@ -153,13 +153,13 @@ function renderDay(refreshMap=true){
   if(!day.hotel)additions.append(button("＋ 添加当晚住宿",()=>editor(additions,day,"hotel",null,null),"add-button"));
   resize();if(refreshMap)updateMarkers();
 }
-function selectDay(id){if(pending)return;selectedDay=id;activeId=null;selectedPlaceRef=null;TravelMindDetails.clear();try{sessionStorage.setItem("day:"+plan.trip_id,id);}catch{}renderDays();renderDay();revealInPage($("journey-content"),true);feedback("");}
+function selectDay(id){if(pending)return;selectedDay=id;activeId=null;selectedPlaceRef=null;RoamoryDetails.clear();try{sessionStorage.setItem("day:"+plan.trip_id,id);}catch{}renderDays();renderDay();revealInPage($("journey-content"),true);feedback("");}
 function focusPlace(id){
   const day=current(),place=day.places[id],item=day.timeline.find(t=>t.reference_id===id);
   if(!place||!item)return;
   selectedPlaceRef={dayId:day.day_id,itemType:item.item_type,id:place.id,place_id:place.place_id||null,
     fingerprint:JSON.stringify([place.name,place.place_id,place.latitude,place.longitude])};
-  TravelMindDetails.select(place,day,labels[item.item_type],loadMap);
+  RoamoryDetails.select(place,day,labels[item.item_type],loadMap);
   surfaceDocument.querySelectorAll(".event").forEach(n=>n.classList.toggle("selected",n.dataset.ref===id));activeId=id;
   surfaceDocument.querySelectorAll(".event .title").forEach(n=>n.setAttribute("aria-pressed",n.closest(".event").dataset.ref===id?"true":"false"));
   for(const [key,data] of markers)data.content.classList.toggle("active",key===id);
@@ -175,11 +175,11 @@ function loadMap(){
   mapPromise=new Promise(resolve=>{
     let settled=false;const fail=message=>{if(settled)return;settled=true;$("map-status").textContent=message;resolve(false);};
     window.gm_authFailure=()=>{settled=false;fail("Google Maps 授权失败，请检查 Maps JavaScript API、结算及浏览器密钥的 HTTP Referer 限制。");};
-    window.initTravelMindMap=()=>{if(settled)return;settled=true;
+    window.initRoamoryMap=()=>{if(settled)return;settled=true;
       map=new google.maps.Map($("map"),{center:{lat:0,lng:0},zoom:2,mapId:"DEMO_MAP_ID",mapTypeControl:false,streetViewControl:false,fullscreenControl:true,gestureHandling:"cooperative"});
       info=new google.maps.InfoWindow();$("map-status").textContent="";resolve(true);
     };
-    const script=surfaceDocument.createElement("script");const params=new URLSearchParams({key:configuredKey,callback:"initTravelMindMap",v:"weekly",libraries:"marker",loading:"async",language:"zh-CN"});
+    const script=surfaceDocument.createElement("script");const params=new URLSearchParams({key:configuredKey,callback:"initRoamoryMap",v:"weekly",libraries:"marker",loading:"async",language:"zh-CN"});
     script.src="https://maps.googleapis.com/maps/api/js?"+params;script.async=true;script.onerror=()=>fail("Google Maps 加载失败，请检查网络连接。");surfaceDocument.head.append(script);
     setTimeout(()=>fail("地图加载超时，请检查网络及浏览器 API 配置。"),15000);
   });return mapPromise;
@@ -216,10 +216,10 @@ window.addEventListener("message",event=>{
   }
   const differentTrip=plan?.trip_id!==args.plan.trip_id;plan=args.plan;configuredKey=args.browser_key||"";mapMessage=args.map_message||"";
   journalEntries=args.journal_entries||[];
-  if(differentTrip){selectedPlaceRef=null;activeId=null;TravelMindDetails.clear();}
+  if(differentTrip){selectedPlaceRef=null;activeId=null;RoamoryDetails.clear();}
   if(selectedPlaceRef){const place=current().places[selectedPlaceRef.id];
     if(!place||selectedPlaceRef.dayId!==selectedDay||selectedPlaceRef.fingerprint!==JSON.stringify([place.name,place.place_id,place.latitude,place.longitude])){
-      selectedPlaceRef=null;activeId=null;TravelMindDetails.clear();
+      selectedPlaceRef=null;activeId=null;RoamoryDetails.clear();
     }
   }
   if(differentTrip||!plan.days.some(d=>d.day_id===selectedDay)){
@@ -238,7 +238,7 @@ function sendChat(message){
 }
 function renderChat(messages){
   $("chat-context").textContent=`${plan.destination} · ${plan.total_days} 天`;
-  $("chat-messages").replaceChildren(...messages.map(m=>{const n=el("div",undefined,"chat-message "+m.role);n.append(el("small",m.role==="user"?"你":"TravelMind"),el("p",m.text));return n;}));
+  $("chat-messages").replaceChildren(...messages.map(m=>{const n=el("div",undefined,"chat-message "+m.role);n.append(el("small",m.role==="user"?"你":"Roamory"),el("p",m.text));return n;}));
   $("chat-count").textContent=messages.length?`(${messages.length})`:"";
   const last=messages[messages.length-1];$("chat-status").textContent=last?.role==="assistant"?last.text:"";
   $("chat-retry").hidden=!last||last.status!=="failed";

@@ -1,12 +1,10 @@
 """Personal notes stored separately from plans; never supplied to an agent."""
-import os
 import sqlite3
 import base64
 import binascii
 from contextlib import closing
 from datetime import date, datetime, timezone
 from io import BytesIO
-from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
@@ -14,6 +12,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import Field, field_validator, model_validator
 from .models import Model
 from .storage import load_plan
+from .config import database_path
 
 
 MAX_IMAGES = 6
@@ -108,7 +107,7 @@ class TravelJournalEntry(Model):
 
 class JournalStore:
     def __init__(self, path=None):
-        self.path = Path(path or os.getenv("TRAVELMIND_DB", "data/travelmind.sqlite3"))
+        self.path = database_path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with closing(self.connect()) as db, db:
             db.execute("""CREATE TABLE IF NOT EXISTS travel_journals (

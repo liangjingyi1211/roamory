@@ -5,3 +5,9 @@ __pycache__/
 .pytest_cache/
 *.pyc
 data/
+Roamory_V2_Codex_Prompt.md
+Roamory_V3_Codex_Prompt.md
+Roamory_V4_Codex_Prompt.md
+Roamory_V5_Codex_Prompt.md
+Roamory_V6_Codex_Prompt.md
+Roamory_V7_Codex_Prompt.md

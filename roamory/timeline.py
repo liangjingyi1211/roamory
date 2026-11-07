@@ -5,13 +5,14 @@ Timeline is authoritative. Activity.planned_* are compatibility projections.
 from datetime import time
 from uuid import NAMESPACE_URL, uuid5
 from .models import DailyPlan, TimelineItem
+from .config import LEGACY_TIMELINE_NAMESPACE
 
 MEALS = {"breakfast": (8 * 60, 9 * 60), "lunch": (12 * 60, 13 * 60), "dinner": (18 * 60, 19 * 60)}
 LABELS = {"breakfast": "早餐", "lunch": "午餐", "dinner": "晚餐"}
 
 def timeline_id(day, kind, key):
-    # Stable even when an untouched V2 payload is migrated on each read.
-    return str(uuid5(NAMESPACE_URL, f"travelmind:{day.day_id}:{kind}:{key}"))
+    # Branding must not change persisted edit targets or legacy migration IDs.
+    return str(uuid5(NAMESPACE_URL, f"{LEGACY_TIMELINE_NAMESPACE}:{day.day_id}:{kind}:{key}"))
 
 def minute(value):
     return value.hour * 60 + value.minute if value is not None else None

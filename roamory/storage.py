@@ -1,11 +1,10 @@
 """Local single-user SQLite persistence and atomic, model-free edits."""
-import os
 import sqlite3
 from datetime import time
-from pathlib import Path
 from .models import TripPlan, Restaurant, Activity, Hotel
 from .timeline import migrate_plan, sync_day
 from .models import TimelineItem
+from .config import database_path
 
 def load_plan(payload):
     plan = migrate_plan(TripPlan.model_validate_json(payload))
@@ -13,7 +12,7 @@ def load_plan(payload):
 
 class TripStore:
     def __init__(self, path=None):
-        self.path = Path(path or os.getenv("TRAVELMIND_DB", "data/travelmind.sqlite3"))
+        self.path = database_path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as db:
             db.execute("CREATE TABLE IF NOT EXISTS trips (id TEXT PRIMARY KEY, payload TEXT NOT NULL, updated TEXT DEFAULT CURRENT_TIMESTAMP, version INTEGER NOT NULL DEFAULT 1)")

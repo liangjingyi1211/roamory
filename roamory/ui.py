@@ -5,7 +5,7 @@ import streamlit.components.v1 as components
 from .timeline import opening_for_date
 from .journal import JournalStore
 
-_component = components.declare_component("travelmind_workspace", path=str(Path(__file__).parent / "frontend"))
+_component = components.declare_component("roamory_workspace", path=str(Path(__file__).parent / "frontend"))
 
 def browser_map_config():
     key = os.getenv("GOOGLE_MAPS_BROWSER_API_KEY", "")

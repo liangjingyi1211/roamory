@@ -42,7 +42,7 @@ input,textarea { font-size: 16px !important; color: var(--ink); caret-color: var
 html:has(.workspace-mode),body:has(.workspace-mode),#root:has(.workspace-mode) {
   height:auto; min-height:100%; max-height:none; overflow:visible;
 }
-html:has(.workspace-mode) { scroll-padding-top:var(--travelmind-map-inset,0px); }
+html:has(.workspace-mode) { scroll-padding-top:var(--roamory-map-inset,0px); }
 .stApp:has(.workspace-mode) {
   position:relative; inset:auto; height:auto; min-height:100dvh; max-height:none; overflow:visible;
 }
@@ -58,7 +58,7 @@ body:has(.workspace-mode) [data-testid="stHeader"] { display:none; }
 [data-testid="stElementContainer"]:has(.workspace-mode) { display:none; }
 [data-testid="stCustomComponentV1"] { height:auto; overflow:visible; }
 .block-container:has(.workspace-mode) iframe[data-testid="stCustomComponentV1"] { display:block; height:0 !important; min-height:0; border:0; }
-.travelmind-surface { display:block; position:relative; width:100%; min-width:0; height:auto; overflow:visible; }
+.roamory-surface { display:block; position:relative; width:100%; min-width:0; height:auto; overflow:visible; }
 /* Keep the floating creation link out of the document's trailing height. */
 .block-container:has(.workspace-mode) [data-testid="stElementContainer"]:has(.new-trip-fab) { height:0; min-height:0; margin:0; padding:0; }
 [data-testid="stMarkdownContainer"]:has(.new-trip-fab) p { margin:0; line-height:0; }

@@ -3,15 +3,15 @@ import asyncio
 from pathlib import Path
 from urllib.parse import urlencode
 import streamlit as st
-from travelmind.storage import TripStore
-from travelmind.journal import JournalStore, apply_journal_event
-from travelmind.pages import render_home, render_trip_library, render_journal_library
-from travelmind.ui import workspace, apply_workspace_event
-from travelmind.assistant import assistant_edit
-from travelmind.agent import safe_error
+from roamory.storage import TripStore
+from roamory.journal import JournalStore, apply_journal_event
+from roamory.pages import render_home, render_trip_library, render_journal_library
+from roamory.ui import workspace, apply_workspace_event
+from roamory.assistant import assistant_edit
+from roamory.agent import safe_error
 
-st.set_page_config(page_title="TravelMind", page_icon="✈️", layout="wide")
-_frontend = Path(__file__).parent / "travelmind" / "frontend"
+st.set_page_config(page_title="Roamory", page_icon="✈️", layout="wide")
+_frontend = Path(__file__).parent / "roamory" / "frontend"
 st.markdown("<style>" + (_frontend / "theme.css").read_text(encoding="utf-8")
     + (_frontend / "shell.css").read_text(encoding="utf-8") + "</style>", unsafe_allow_html=True)
 store = TripStore()

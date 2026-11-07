@@ -51,7 +51,7 @@ class EditResponse(Model):
     updated_day_id: str | None = None
     version: int | None = None
 
-PARSER_INSTRUCTION = """Parse a TravelMind LOCAL edit request. Output only the schema.
+PARSER_INSTRUCTION = """Parse a Roamory LOCAL edit request. Output only the schema.
 Only ONE action per message: replace (existing nonempty slot/item), add (one activity
 or an empty meal/hotel), replan (one explicitly specified day or category on that day).
 Deletion, time edits, questions, whole-trip regeneration, and multiple operations
@@ -179,11 +179,11 @@ async def run_specialist(role, plan, day, candidates, intent):
     sid = str(uuid.uuid4())
     context = plan.model_dump(mode="json")
     context["days"] = [d.model_dump(mode="json") for d in plan.days if abs(d.day_index - day.day_index) <= 1]
-    await sessions.create_session(app_name="travelmind_edit", user_id="local_user", session_id=sid,
+    await sessions.create_session(app_name="roamory_edit", user_id="local_user", session_id=sid,
         state={"trip_request": json.dumps({"destination": plan.destination, "preferences": plan.preferences.model_dump()}, ensure_ascii=False),
             "current_plan": json.dumps(context, ensure_ascii=False), "edit_scope": json.dumps(scope, ensure_ascii=False),
             f"{role}_candidates": json.dumps(candidates, ensure_ascii=False)})
-    runner = Runner(agent=agent, app_name="travelmind_edit", session_service=sessions)
+    runner = Runner(agent=agent, app_name="roamory_edit", session_service=sessions)
     final = None
     async def execute():
         nonlocal final

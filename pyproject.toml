@@ -1,7 +1,7 @@
 [project]
-name = "travelmind-starter"
+name = "roamory"
 version = "0.1.0"
-description = "Local ADK travel planning multi-agent starter"
+description = "Roamory travel planning and personal journals powered by Google ADK"
 requires-python = ">=3.11,<3.14"
 dependencies = [
   "google-adk>=1.0,<3",
