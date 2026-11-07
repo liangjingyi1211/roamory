@@ -5,7 +5,7 @@ const $ = id => document.getElementById(id);
 const el = (tag, text, cls) => {const n=document.createElement(tag); if(text!==undefined)n.textContent=text; if(cls)n.className=cls; return n;};
 const mealLabels = {breakfast:"早餐",lunch:"午餐",dinner:"晚餐"};
 const labels = {activity:"景点",meal:"餐饮",hotel:"当晚住宿",custom:"自由安排"};
-let plan, selectedDay, map, info, mapPromise, activeId, pending, lastAck, renderedSignature;
+let plan, selectedDay, selectedPlaceRef=null, map, info, mapPromise, activeId, pending, lastAck, renderedSignature, pendingPrompt="";
 const markers = new Map();
 let configuredKey = "", mapMessage = "";
 function resize(){post("streamlit:setFrameHeight", {height:Math.max(720, document.body.scrollHeight + 24)});}
@@ -15,7 +15,7 @@ function button(text, fn, cls){const b=el("button",text,cls);b.type="button";b.o
 function current(){return plan.days.find(d=>d.day_id===selectedDay)||plan.days[0];}
 function submit(day,slot,action,args={}){
   if(pending)return;
-  const event={event_id:crypto.randomUUID(),trip_id:plan.trip_id,day_id:day.day_id,slot,action,arguments:args};
+  const event={event_id:crypto.randomUUID(),trip_id:plan.trip_id,trip_version:plan.version,day_id:day.day_id,slot,action,arguments:args};
   pending=event.event_id;feedback("正在保存到本机…");document.querySelectorAll("button,input").forEach(n=>n.disabled=true);
   post("streamlit:setComponentValue",{value:event,dataType:"json"});
 }
@@ -69,10 +69,11 @@ function renderDay(){
   const root=$("timeline");root.replaceChildren();
   for(const item of day.timeline){
     const place=day.places[item.reference_id],slot=item.item_type==="meal"?item.meal_type:item.item_type==="activity"?"activities":"hotel";
-    const row=el("article",undefined,`event ${item.item_type}`);row.dataset.ref=item.reference_id||item.id;
+    const row=el("article",undefined,`event ${item.item_type}${item.reference_id&&item.reference_id===activeId?" selected":""}`);row.dataset.ref=item.reference_id||item.id;
     const when=el("div",item.start_time?.slice(0,5)||"待安排","when");if(item.end_time)when.append(el("span",item.end_time.slice(0,5)));
     const rail=el("div",undefined,"rail");rail.append(el("i",undefined,"dot"));
     const body=el("div",undefined,"event-body");body.append(el("div",item.meal_type?mealLabels[item.meal_type]:labels[item.item_type],"kind"));
+    body.onclick=e=>{if(!e.target.closest("button,a,input,textarea,form,details"))focusPlace(item.reference_id);};
     const title=button(item.title,()=>focusPlace(item.reference_id),"title"+(!place?" empty":""));body.append(title);
     if(place?.address)body.append(el("p",place.address,"address"));
     if(place&&(!Number.isFinite(place.latitude)||!Number.isFinite(place.longitude)))body.append(el("p","暂无地图位置","subtle"));
@@ -93,8 +94,13 @@ function renderDay(){
   if(!day.hotel)additions.append(button("＋ 添加当晚住宿",()=>editor(additions,day,"hotel",null,null),"add-button"));
   resize();updateMarkers();
 }
-function selectDay(id){if(pending)return;selectedDay=id;activeId=null;try{sessionStorage.setItem("day:"+plan.trip_id,id);}catch{}renderDays();renderDay();feedback("");}
+function selectDay(id){if(pending)return;selectedDay=id;activeId=null;selectedPlaceRef=null;TravelMindDetails.clear();try{sessionStorage.setItem("day:"+plan.trip_id,id);}catch{}renderDays();renderDay();feedback("");}
 function focusPlace(id){
+  const day=current(),place=day.places[id],item=day.timeline.find(t=>t.reference_id===id);
+  if(!place||!item)return;
+  selectedPlaceRef={dayId:day.day_id,itemType:item.item_type,id:place.id,place_id:place.place_id||null,
+    fingerprint:JSON.stringify([place.name,place.place_id,place.latitude,place.longitude])};
+  TravelMindDetails.select(place,day,labels[item.item_type],loadMap);
   document.querySelectorAll(".event").forEach(n=>n.classList.toggle("selected",n.dataset.ref===id));activeId=id;
   for(const [key,data] of markers)data.content.classList.toggle("active",key===id);
   const selected=markers.get(id);if(!selected)return;
@@ -126,8 +132,8 @@ async function updateMarkers(){
     if(!place||!Number.isFinite(place.latitude)||!Number.isFinite(place.longitude))continue;
     if(place.latitude < -90||place.latitude>90||place.longitude < -180||place.longitude>180)continue;
     const position={lat:place.latitude,lng:place.longitude},content=el("div",String(++count),"marker-label "+item.item_type);
-    const marker=new google.maps.marker.AdvancedMarkerElement({map,position,title:place.name,content});
-    marker.addListener("click",()=>focusPlace(place.id));markers.set(place.id,{marker,place,type:item.item_type,content});bounds.extend(position);
+    const marker=new google.maps.marker.AdvancedMarkerElement({map,position,title:place.name,content,gmpClickable:true});
+    marker.addEventListener("gmp-click",()=>focusPlace(place.id));markers.set(place.id,{marker,place,type:item.item_type,content});bounds.extend(position);
   }
   $("map-status").textContent=count?"":"当天暂无可展示的地点坐标。";
   if(count===1){map.setCenter(bounds.getCenter());map.setZoom(14);}else if(count>1){map.fitBounds(bounds,44);google.maps.event.addListenerOnce(map,"idle",()=>{if(map.getZoom()>16)map.setZoom(16);});}
@@ -138,20 +144,44 @@ window.addEventListener("message",event=>{
   const args=event.data.args;if(!args?.plan)return;
   // Streamlit can resend unchanged props on layout/resize notifications. Do not
   // destroy an in-progress editor (or recreate markers) for those notifications.
-  const signature=JSON.stringify([args.plan,args.browser_key,args.map_message,args.acknowledgment]);
+  const signature=JSON.stringify([args.plan,args.browser_key,args.map_message,args.acknowledgment,args.conversation]);
   if(signature===renderedSignature)return;
   if(pending&&args.acknowledgment?.event_id!==pending)return;
   renderedSignature=signature;
   const acknowledgment=args.acknowledgment;
   if(acknowledgment&&acknowledgment.event_id===pending){
-    pending=null;document.querySelectorAll("button,input").forEach(n=>n.disabled=false);
+    pending=null;document.querySelectorAll("button,input,textarea").forEach(n=>n.disabled=false);
     if(!acknowledgment.success){feedback(acknowledgment.message,true);lastAck=acknowledgment.event_id;return;}
   }
   const differentTrip=plan?.trip_id!==args.plan.trip_id;plan=args.plan;configuredKey=args.browser_key||"";mapMessage=args.map_message||"";
+  if(differentTrip){selectedPlaceRef=null;activeId=null;TravelMindDetails.clear();}
+  if(selectedPlaceRef){const place=current().places[selectedPlaceRef.id];
+    if(!place||selectedPlaceRef.dayId!==selectedDay||selectedPlaceRef.fingerprint!==JSON.stringify([place.name,place.place_id,place.latitude,place.longitude])){
+      selectedPlaceRef=null;activeId=null;TravelMindDetails.clear();
+    }
+  }
   if(differentTrip||!plan.days.some(d=>d.day_id===selectedDay)){
     try{selectedDay=sessionStorage.getItem("day:"+plan.trip_id);}catch{}if(!plan.days.some(d=>d.day_id===selectedDay))selectedDay=plan.days[0].day_id;
   }
   renderDays();renderDay();
-  if(acknowledgment?.success&&acknowledgment.event_id!==lastAck){feedback("已保存 · 时间线与地图已同步");lastAck=acknowledgment.event_id;}
+  renderChat(args.conversation||[]);
+  if(acknowledgment?.success&&acknowledgment.event_id!==lastAck){feedback(acknowledgment.message||"已保存 · 时间线与地图已同步",!!acknowledgment.assistant_status&&acknowledgment.assistant_status!=="success");lastAck=acknowledgment.event_id;}
 });
+function sendChat(message){
+  if(pending||!message.trim())return;
+  pendingPrompt=message;pending=crypto.randomUUID();$("chat-status").textContent="正在解析修改范围并处理，请稍候…";
+  $("chat-retry").hidden=true;document.querySelectorAll("button,input,textarea").forEach(n=>n.disabled=true);
+  post("streamlit:setComponentValue",{dataType:"json",value:{event_id:pending,kind:"assistant",trip_id:plan.trip_id,
+    trip_version:plan.version,message,selected_day_id:selectedDay,selected_place_ref:selectedPlaceRef}});
+}
+function renderChat(messages){
+  $("chat-context").textContent=`${plan.destination} · ${plan.total_days} 天`;
+  $("chat-messages").replaceChildren(...messages.map(m=>{const n=el("div",undefined,"chat-message "+m.role);n.append(el("small",m.role==="user"?"你":"TravelMind"),el("p",m.text));return n;}));
+  $("chat-count").textContent=messages.length?`(${messages.length})`:"";
+  const last=messages[messages.length-1];$("chat-status").textContent=last?.role==="assistant"?last.text:"";
+  $("chat-retry").hidden=!last||last.status!=="failed";
+  if(last?.status==="success")$("chat-input").value="";
+}
+$("chat-form").onsubmit=e=>{e.preventDefault();sendChat($("chat-input").value);};
+$("chat-retry").onclick=()=>sendChat(pendingPrompt||$("chat-input").value);
 post("streamlit:componentReady",{apiVersion:1});resize();

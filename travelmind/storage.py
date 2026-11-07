@@ -18,7 +18,13 @@ class TripStore:
         self.path = Path(path or os.getenv("TRAVELMIND_DB", "data/travelmind.sqlite3"))
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as db:
-            db.execute("CREATE TABLE IF NOT EXISTS trips (id TEXT PRIMARY KEY, payload TEXT NOT NULL, updated TEXT DEFAULT CURRENT_TIMESTAMP)")
+            db.execute("CREATE TABLE IF NOT EXISTS trips (id TEXT PRIMARY KEY, payload TEXT NOT NULL, updated TEXT DEFAULT CURRENT_TIMESTAMP, version INTEGER NOT NULL DEFAULT 1)")
+            if "version" not in {row[1] for row in db.execute("PRAGMA table_info(trips)")}:
+                backup = self.path.with_suffix(".v3-backup.sqlite3")
+                if not backup.exists():
+                    with sqlite3.connect(backup) as target:
+                        db.backup(target)
+                db.execute("ALTER TABLE trips ADD COLUMN version INTEGER NOT NULL DEFAULT 1")
 
     def connect(self):
         return sqlite3.connect(self.path, timeout=10)
@@ -26,15 +32,23 @@ class TripStore:
     def save(self, plan: TripPlan):
         plan = migrate_plan(TripPlan.model_validate(plan.model_dump()))
         with self.connect() as db:
-            db.execute("INSERT INTO trips(id,payload) VALUES (?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload,updated=CURRENT_TIMESTAMP",
-                (plan.trip_id, plan.model_dump_json()))
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT version FROM trips WHERE id=?", (plan.trip_id,)).fetchone()
+            if row and row[0] != plan.version:
+                raise VersionConflict("行程已被修改，请刷新后重新提交")
+            if row:
+                plan.version += 1
+            db.execute("INSERT INTO trips(id,payload,version) VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload,version=excluded.version,updated=CURRENT_TIMESTAMP",
+                (plan.trip_id, plan.model_dump_json(), plan.version))
 
     def get(self, trip_id: str) -> TripPlan:
         with self.connect() as db:
-            row = db.execute("SELECT payload FROM trips WHERE id=?", (trip_id,)).fetchone()
+            row = db.execute("SELECT payload,version FROM trips WHERE id=?", (trip_id,)).fetchone()
         if row is None:
             raise ValueError("行程不存在")
-        return load_plan(row[0])
+        plan = load_plan(row[0])
+        plan.version = row[1]
+        return plan
 
     def list_trips(self):
         with self.connect() as db:
@@ -42,14 +56,17 @@ class TripStore:
         return [(key, f'{(p := TripPlan.model_validate_json(payload)).destination} · {p.start_date} — {p.end_date}') for key, payload in rows]
 
     def edit(self, trip_id, day_id, slot, action, *, name=None, item_id=None, direction=None,
-             start_time=None, end_time=None):
+             start_time=None, end_time=None, expected_version=None):
         """Read-modify-write under one transaction; never calls generation or Places."""
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT payload FROM trips WHERE id=?", (trip_id,)).fetchone()
+            row = db.execute("SELECT payload,version FROM trips WHERE id=?", (trip_id,)).fetchone()
             if row is None:
                 raise ValueError("行程不存在")
             plan = load_plan(row[0])
+            plan.version = row[1]
+            if expected_version is not None and row[1] != expected_version:
+                raise VersionConflict("行程已被修改，请刷新后重试")
             day = next((d for d in plan.days if d.day_id == day_id), None)
             if day is None:
                 raise ValueError("日期不存在")
@@ -103,5 +120,40 @@ class TripStore:
             sync_day(day)
             plan.estimated_total_cost = estimate_cost(plan)
             plan = TripPlan.model_validate(plan.model_dump())
-            db.execute("UPDATE trips SET payload=?,updated=CURRENT_TIMESTAMP WHERE id=?", (plan.model_dump_json(), trip_id))
+            plan.version += 1
+            db.execute("UPDATE trips SET payload=?,version=?,updated=CURRENT_TIMESTAMP WHERE id=?", (plan.model_dump_json(), plan.version, trip_id))
         return plan
+
+    def apply_scoped_patch(self, base, day_id, changes, *, reschedule=False):
+        """Only whitelisted day fields, optimistic lock, one atomic write."""
+        if not changes or set(changes) - {"breakfast", "lunch", "dinner", "activities", "hotel"}:
+            raise ValueError("局部补丁包含越界字段")
+        plan = base.model_copy(deep=True)
+        day = next((d for d in plan.days if d.day_id == day_id), None)
+        if day is None:
+            raise ValueError("日期不存在")
+        for field, value in changes.items():
+            setattr(day, field, value)
+        if reschedule:
+            from .timeline import schedule_day
+            schedule_day(day)
+        else:
+            # New AI activities may carry suggestions. Preserve every existing
+            # timeline time; only attach times for genuinely new references.
+            from .timeline import timeline_id
+            refs = {t.reference_id for t in day.timeline}
+            for activity in day.activities:
+                if activity.id not in refs:
+                    day.timeline.append(TimelineItem(id=timeline_id(day, "activity", activity.id),
+                        item_type="activity", reference_id=activity.id, title=activity.name,
+                        start_time=activity.planned_start_time, end_time=activity.planned_end_time,
+                        notes="AI 建议当地时间，未验证开放时间"))
+            sync_day(day)
+        plan.estimated_total_cost = estimate_cost(plan)
+        plan = TripPlan.model_validate(plan.model_dump())
+        # Version check occurs inside save's write transaction, after all remote work.
+        self.save(plan)
+        return self.get(plan.trip_id)
+
+class VersionConflict(ValueError):
+    pass

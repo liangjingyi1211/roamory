@@ -23,10 +23,10 @@ def workspace_payload(plan):
             for p in places if p}
     return data
 
-def workspace(plan, acknowledgment=None):
+def workspace(plan, acknowledgment=None, conversation=None):
     key, message = browser_map_config()
     return _component(plan=workspace_payload(plan), browser_key=key, map_message=message,
-        acknowledgment=acknowledgment, default=None, key="workspace:" + plan.trip_id)
+        acknowledgment=acknowledgment, conversation=conversation or [], default=None, key="workspace:" + plan.trip_id)
 
 def apply_workspace_event(store, trip_id, event):
     if not isinstance(event, dict) or event.get("trip_id") != trip_id:
@@ -35,4 +35,5 @@ def apply_workspace_event(store, trip_id, event):
     arguments = event.get("arguments", {})
     if not isinstance(arguments, dict) or set(arguments) - allowed:
         raise ValueError("不支持的编辑字段")
-    return store.edit(trip_id, event["day_id"], event["slot"], event["action"], **arguments)
+    return store.edit(trip_id, event["day_id"], event["slot"], event["action"],
+        expected_version=event.get("trip_version"), **arguments)

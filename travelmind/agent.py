@@ -81,11 +81,13 @@ hotel_agent = LlmAgent(name="hotel_agent", model=MODEL, output_schema=HotelOutpu
 def activity_coordinates(day):
     return [(a.latitude, a.longitude) for a in day.activities if a.latitude is not None and a.longitude is not None]
 
-async def dynamic_candidates(plan, role):
+async def dynamic_candidates(plan, role, *, day_ids=None, meal_types=None, include_last_hotel=False):
     """Activity-dependent per-day/per-slot retrieval, with one bounded expansion."""
     result = {}
     for i, day in enumerate(plan.days):
-        if role == "hotel" and i == len(plan.days) - 1:
+        if day_ids is not None and day.day_id not in day_ids:
+            continue
+        if role == "hotel" and i == len(plan.days) - 1 and not include_last_hotel:
             continue
         points = activity_coordinates(day)
         if not points:
@@ -106,6 +108,8 @@ async def dynamic_candidates(plan, role):
         anchors = {"breakfast": first, "lunch": middle, "dinner": last} if role == "food" else {"hotel": last}
         day_rows = {}
         for slot, anchor in anchors.items():
+            if role == "food" and meal_types is not None and slot not in meal_types:
+                continue
             rows = []
             try:
                 for radius in (2000, 8000):

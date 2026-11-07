@@ -167,6 +167,7 @@ class CostEstimate(Model):
 
 class TripPlan(TripRequest):
     trip_id: str = Field(default_factory=new_id)
+    version: int = Field(default=1, ge=1)
     total_days: int = Field(ge=1)
     days: list[DailyPlan] = Field(default_factory=list)
     estimated_total_cost: CostEstimate | None = None

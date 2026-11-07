@@ -78,7 +78,7 @@ def test_persistent_edits_and_page(tmp_path, monkeypatch):
     assert store.get(plan.trip_id).days[0].lunch.name == "手动餐厅"
     events = [{"event_id": "test-save", "trip_id": plan.trip_id, "day_id": day.day_id,
         "slot": "breakfast", "action": "save", "arguments": {"name": "页面新增早餐"}}]
-    monkeypatch.setattr("travelmind.ui.workspace", lambda plan, ack: events.pop() if events else None)
+    monkeypatch.setattr("travelmind.ui.workspace", lambda plan, ack, conversation=None: events.pop() if events else None)
     app = AppTest.from_file(Path(__file__).resolve().parents[1] / "streamlit_app.py")
     app.query_params["trip"] = plan.trip_id
     app.run(timeout=20)

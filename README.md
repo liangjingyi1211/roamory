@@ -1,6 +1,8 @@
-# TravelMind V3
+# TravelMind V4
 
-Google ADK + Streamlit + SQLite 旅行规划器。三个专家按阶段生成真实地点推荐，后端确定性编排每日时间线；左侧选择日期，右侧同时展示当天时间线与 Google Maps。地图只展示地点，不提供路线、交通方式、ETA 或交通费用。
+Google ADK + Streamlit + SQLite 旅行规划器。保留三个专家和 V3 完整生成流程，新增仅支持替换、增加、单日重新规划的 AI 局部修改。工作台提供每日时间线、M1 地点地图与 M2 官方地点详情，左下角新建入口提供独立创建与历史旅程视图。地图不提供路线、交通方式、ETA 或交通费用。
+
+V4 的文件变更、状态流、意图契约、版本保护、验收结果和已知限制见 [V4 实施报告](V4_IMPLEMENTATION.md)。
 
 ## 启动与配置
 
@@ -13,7 +15,7 @@ uv run --env-file .env streamlit run streamlit_app.py
 
 交互地图需要独立的 **`GOOGLE_MAPS_BROWSER_API_KEY`**：
 
-1. 在 Google Cloud 中启用 Maps JavaScript API 和结算。
+1. 在 Google Cloud 中启用 Maps JavaScript API、Places API (New) 和结算；浏览器密钥的 API 限制也需允许这两项。M1 与 M2 权限独立，M1 正常不代表 M2 详情已获准。
 2. 为该浏览器密钥设置 HTTP Referer 限制，例如 `http://localhost:8501/*`、`http://127.0.0.1:8501/*` 以及实际部署域名。验证端口 8511 需要单独允许。
 3. 将其加入本机 `.env`，重启应用。不要把密钥提交到 Git。
 4. 后端密钥仅供服务端 Places API (New)。浏览器配置为空或与后端相同时，程序不发送后端密钥，并在地图区域显示原因。
@@ -45,6 +47,8 @@ uv run --env-file .env adk web .
 ADK Web 输出结构化 TripPlan；通过 Streamlit 生成或显式调用 TripStore.save 才会写入 SQLite。
 
 ## 数据流与 Agent
+
+以下是保留的完整初始生成流程。聊天使用独立的局部修改流程，不会调用此入口覆盖整个 TripPlan。
 
 ```text
 TripRequest → Coordinator 确定日期与空槽
@@ -96,12 +100,13 @@ TripRequest → Coordinator 确定日期与空槽
 
 ## 前端与地图
 
-Streamlit 原有生成表单、会话入口和费用概览保留，主界面由一个静态 HTML/CSS/JS 双向组件承载，无 React/npm 运行依赖或独立 HTTP 服务。
+Streamlit 原有生成表单迁移到独立创建视图，历史旅程入口在该视图内。顶部由 AI 聊天区替代旧表单/下拉框，移除了 JSON 导出入口。主界面由静态 HTML/CSS/JS 双向组件承载，无 React/npm 运行依赖或独立 HTTP 服务。
 
 - 桌面：左侧日期摘要卡；右侧时间线与地图两栏。窄屏：横向日期列表、时间线、地图依次排列。
 - 日期选择完全在前端执行，不提交生成请求，不调用 Agent。
 - Google Maps JavaScript API 使用 AdvancedMarkerElement，按当天 Timeline 引用提取有真实坐标的地点。切换日期或编辑时清理旧 Marker，复用同一 Map 实例并 fitBounds。
 - Marker 点击与时间线地点点击双向高亮，InfoWindow 展示名称、类型、地址。没有坐标的人工地点仅显示时间线提示，不生成 Marker。
+- M1 下方增加 M2。只有明确点击地点时才用其 Google place_id 调用官方 Place.fetchFields；不自动匹配人工名称。按需加载、并发去重和过期结果检查避免详情错位。照片和来源署名仅用于当前面板，不写入 SQLite。
 - 页面不调用 Directions、Routes 或 Geocoding API，不绘制任何路线。
 - 餐厅详情仅显示旅行日期对应星期的源营业时段，支持多时段与前日跨午夜延续。没有数据时显示“暂无数据”，不把缺失推断成休息或 24 小时营业。
 
@@ -121,21 +126,23 @@ Streamlit 原有生成表单、会话入口和费用概览保留，主界面由�
 | `travelmind/timeline.py` | 编排、排序、冲突检测、迁移、当日营业时间 |
 | `travelmind/storage.py` | SQLite 局部事务编辑、时间权威同步 |
 | `travelmind/ui.py` | 浏览器密钥隔离、视图数据和编辑事件桥接 |
+| `travelmind/assistant.py` | 三意图结构化解析、目标解析、专家局部调度、受限补丁与回滚 |
 | `travelmind/frontend/` | 日期选择、时间线、编辑表单、Google Maps 生命周期 |
 | `streamlit_app.py` | 表单、费用概览、工作区挂载与保存反馈 |
-| `tests/test_tools.py` | 保留原测试文件，增量验证 V3 核心行为 |
+| `tests/test_tools.py`、`tests/test_assistant.py` | 生成与编辑回归、V4 范围保护、并发与迁移 |
 
 ```powershell
 uv run pytest -q
 uv run python -m compileall -q travelmind streamlit_app.py
 node --check travelmind/frontend/app.js
+node --check travelmind/frontend/place-details.js
 ```
 
 静态组件无需 npm 构建。开发期间已通过真实 Places/Gemini 三天悉尼行程：每天 2 个景点、三餐均有推荐、前两晚酒店不同、离开日无酒店，统一时间线无直接重叠。验证数据与用户库分开保存。
 
 本次验证结果：8 项 pytest 测试通过，Python 编译、JavaScript 语法和 Git 差异检查通过。无头 Chrome 实际验证了桌面/手机布局、手机无横向溢出、日期切换、时间编辑与重叠提示、地点替换/删除和刷新恢复；操作前后生成日志数量相同。独立 JavaScript API 测试替身验证了 Marker 清理、双向高亮、缺坐标处理，以及跨日期复用单一 Map 实例。一次性浏览器检查脚本验证后删除。
 
-地图的真实授权和图块展示需要配置独立浏览器密钥后验证；测试替身只能验证 Marker 更新和交互逻辑，不能证明云端 API 已启用或授权成功。
+V4 本轮已验证真实模型解析和 Food Agent 单餐推荐，14 项测试通过；浏览器已验证 M1/M2 联动和真实聊天保存。当前真实 M2 请求返回 403 / PERMISSION_DENIED，降级显示与重试已通过验证；仍需核对浏览器密钥对应项目的 Places API (New) 启用与限制。测试替身不代表真实详情授权成功。
 
 ### 已知边界
 
