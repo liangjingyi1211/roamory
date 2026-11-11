@@ -97,7 +97,7 @@ class PlacesClient:
         payload = {"includedTypes": ["restaurant" if kind == "restaurant" else "lodging"],
             "maxResultCount": 20, "rankPreference": "DISTANCE", "languageCode": "zh-CN",
             "locationRestriction": {"circle": {"center": {"latitude": latitude, "longitude": longitude}, "radius": radius}}}
-        fields = "id,displayName,formattedAddress,location,googleMapsUri,primaryType,types,rating,priceLevel,regularOpeningHours,businessStatus,addressComponents"
+        fields = "id,displayName,formattedAddress,location,googleMapsUri,primaryType,types,rating,priceLevel,regularOpeningHours,businessStatus,addressComponents,containingPlaces"
         rows = self._request(payload, fields, endpoint="searchNearby")
         expected = {"restaurant"} if kind == "restaurant" else {"hotel", "lodging"}
         accepted = [r for r in rows if r.get("id") and r.get("displayName", {}).get("text")
@@ -112,7 +112,39 @@ class PlacesClient:
         self._cache[key] = (time.monotonic(), accepted)
         return accepted
 
+    def search_inside(self, destination, place_id, place_name):
+        """Search for restaurants, accepting only Google's explicit parent IDs.
+
+        https://developers.google.com/maps/documentation/places/web-service/reference/rest/v1/places#ContainingPlace
+        A text match, address, viewport or distance is never containment evidence.
+        """
+        if not place_id:
+            return []
+        key = ("inside", destination, place_id)
+        cached = self._cache.get(key)
+        if cached and time.monotonic() - cached[0] < 900:
+            return cached[1]
+        region = self.resolve_destination(destination)
+        payload = {"textQuery": f"restaurants in {place_name} in {destination}",
+            "includedType": "restaurant", "strictTypeFiltering": True, "pageSize": 20,
+            "languageCode": "zh-CN", "locationRestriction": {"rectangle": region["viewport"]}}
+        fields = "id,displayName,formattedAddress,location,googleMapsUri,types,priceLevel,regularOpeningHours,businessStatus,addressComponents,containingPlaces"
+        rows = self._request(payload, fields)
+        accepted = [r for r in rows if r.get("id") and r.get("displayName", {}).get("text")
+            and "restaurant" in r.get("types", []) and within_destination(r, region)
+            and r.get("businessStatus") not in {"CLOSED_PERMANENTLY", "CLOSED_TEMPORARILY"}
+            and contained_in(r, place_id)]
+        audit("inside_search", destination=destination, parent_place_id=place_id,
+            received=len(rows), candidate_ids=[r["id"] for r in accepted])
+        self._cache[key] = (time.monotonic(), accepted)
+        return accepted
+
 client = PlacesClient()
+
+
+def contained_in(row, place_id):
+    return bool(place_id and any(p.get("id") == place_id or p.get("name") == f"places/{place_id}"
+        for p in row.get("containingPlaces", [])))
 
 def country_code(row):
     return next((c.get("shortText") for c in row.get("addressComponents", []) if "country" in c.get("types", [])), None)
@@ -138,7 +170,12 @@ def opening_hours(row: dict) -> list[dict]:
     result = []
     for period in row.get("regularOpeningHours", {}).get("periods", []):
         start, end = period.get("open"), period.get("close")
-        if not start or not end or "day" not in start:
+        if not start or "day" not in start:
+            continue
+        if not end:
+            # Google's documented 24/7 representation, not missing-hours inference.
+            if start.get("day") == 0 and start.get("hour", 0) == 0 and start.get("minute", 0) == 0:
+                result.extend({"day_of_week": day, "open_time": "00:00", "close_time": "00:00"} for day in range(1, 8))
             continue
         result.append({"day_of_week": (start["day"] + 6) % 7 + 1,
             "open_time": f'{start.get("hour", 0):02}:{start.get("minute", 0):02}',

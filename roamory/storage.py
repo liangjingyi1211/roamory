@@ -145,6 +145,11 @@ class TripStore:
                         start_time=activity.planned_start_time, end_time=activity.planned_end_time,
                         notes="AI 建议当地时间，未验证开放时间"))
             sync_day(day)
+            # Explicit AI food changes may adjust their own conflicting slots;
+            # manual edit() still only synchronizes and reports conflicts.
+            from .timeline import schedule_meals
+            schedule_meals(day, [slot for slot in changes if slot in {"breakfast", "lunch", "dinner"}
+                and getattr(day, slot) and getattr(day, slot).place_id])
         plan = TripPlan.model_validate(plan.model_dump())
         # Version check occurs inside save's write transaction, after all remote work.
         self.save(plan)

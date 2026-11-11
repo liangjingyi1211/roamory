@@ -50,6 +50,8 @@ class PlaceBase(Model):
 
 class Restaurant(PlaceBase):
     place_id: str | None = None
+    # Set only from a matching Google Places containingPlaces relationship.
+    containing_place_id: str | None = None
     cuisine: list[str] = Field(default_factory=list)
     price_level: str | None = None
     opening_hours: list[OpeningHours] = Field(default_factory=list)

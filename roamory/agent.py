@@ -9,9 +9,9 @@ from google.adk.events import Event, EventActions
 from google.genai import types
 from pydantic import BaseModel, Field
 from .models import TripRequest, TripPlan, Activity, Restaurant, Hotel, initialize_plan
-from .places import client, opening_hours, place_fields
+from .places import client, opening_hours, place_fields, contained_in
 from .audit import audit
-from .timeline import schedule_day
+from .timeline import schedule_day, conflicting_activities, meal_slot
 from .places import distance_m
 
 load_dotenv()
@@ -65,12 +65,16 @@ COMMON = ("Only select exact place IDs from the supplied candidates. Never inven
 activity_agent = LlmAgent(name="activity_agent", model=MODEL, output_schema=ActivityOutput,
     output_key="activity_result", instruction=COMMON +
     "Plan a geographically sensible activity order, respecting pace and partial arrival/departure days. "
+    "Keep full activity visits; default meal templates must not shorten or displace them. "
     "Suggested times are optional, not verified opening times. Candidates: {activity_candidates}.")
 food_agent = LlmAgent(name="food_agent", model=MODEL, output_schema=FoodOutput,
     output_key="food_result", instruction=COMMON +
     "Choose breakfast, lunch, dinner near each day's activities, considering food preferences. "
     "Candidates are grouped by day_index then breakfast/lunch/dinner. Only choose IDs from that day's exact meal pool. "
-    "Do not hard-filter by opening hours. Use null if no suitable verified candidate. Candidates: {food_candidates}.")
+    "For ordinary pools do not hard-filter by opening hours. Pools with dining_schedule have already been "
+    "verified for a feasible meal slot: choose a suitable restaurant from that pool or null. "
+    "Never infer containment from names or distances, and never alter activity times. "
+    "Use null if no suitable verified candidate. Candidates: {food_candidates}.")
 hotel_agent = LlmAgent(name="hotel_agent", model=MODEL, output_schema=HotelOutput,
     output_key="hotel_result", instruction=COMMON +
     "Choose each night's hotel from that day's candidate pool, near the day's last activities; "
@@ -81,7 +85,53 @@ hotel_agent = LlmAgent(name="hotel_agent", model=MODEL, output_schema=HotelOutpu
 def activity_coordinates(day):
     return [(a.latitude, a.longitude) for a in day.activities if a.latitude is not None and a.longitude is not None]
 
-async def dynamic_candidates(plan, role, *, day_ids=None, meal_types=None, include_last_hotel=False):
+def restaurant_from_candidate(row, day, meal):
+    parent = next((a.place_id for a in conflicting_activities(day, meal) if contained_in(row, a.place_id)), None)
+    return Restaurant(**place_fields(row), price_level=row.get("priceLevel"),
+        opening_hours=opening_hours(row), containing_place_id=parent)
+
+
+async def conflict_dining_candidates(plan, day, meal, *, internal_first=True):
+    """Trust only API containment and positive hours, then try bounded external search."""
+    conflicts = conflicting_activities(day, meal)
+    rows = []
+    if internal_first:
+        for activity in conflicts:
+            try:
+                found = await asyncio.to_thread(client.search_inside, plan.destination, activity.place_id, activity.name)
+                rows.extend(r for r in found if contained_in(r, activity.place_id)
+                    and meal_slot(day, meal, restaurant_from_candidate(r, day, meal)) is not None)
+            except Exception as exc:
+                audit("inside_search_error", trip_id=plan.trip_id, day_index=day.day_index,
+                    meal=meal, parent_place_id=activity.place_id, error=safe_error(exc))
+    if not rows:
+        anchor = next(((a.latitude, a.longitude) for a in conflicts
+            if a.latitude is not None and a.longitude is not None), None)
+        if anchor:
+            for radius in (2000, 8000):
+                try:
+                    found = await asyncio.to_thread(client.search_nearby, plan.destination, "restaurant", *anchor, radius)
+                    rows = [r for r in found if not any(contained_in(r, a.place_id) for a in conflicts)
+                        and meal_slot(day, meal, restaurant_from_candidate(r, day, meal)) is not None]
+                except Exception as exc:
+                    day.notes.append(f"{meal} 附近地点检索失败：{safe_error(exc)}")
+                    break
+                if rows:
+                    break
+    accepted = {}
+    for row in rows:
+        restaurant = restaurant_from_candidate(row, day, meal)
+        start, end = meal_slot(day, meal, restaurant)
+        accepted[row["id"]] = {**row, "dining_schedule": {
+            "start_time": f"{start // 60:02}:{start % 60:02}", "end_time": f"{end // 60:02}:{end % 60:02}",
+            "containing_place_id": restaurant.containing_place_id}}
+    audit("conflict_dining_candidates", trip_id=plan.trip_id, day_index=day.day_index, meal=meal,
+        activity_ids=[a.place_id for a in conflicts], candidate_ids=list(accepted),
+        internal=bool(accepted and next(iter(accepted.values()))["dining_schedule"]["containing_place_id"]))
+    return list(accepted.values())
+
+
+async def dynamic_candidates(plan, role, *, day_ids=None, meal_types=None, include_last_hotel=False, internal_first=True):
     """Activity-dependent per-day/per-slot retrieval, with one bounded expansion."""
     result = {}
     for i, day in enumerate(plan.days):
@@ -97,12 +147,13 @@ async def dynamic_candidates(plan, role, *, day_ids=None, meal_types=None, inclu
                     points = [(region["location"]["latitude"], region["location"]["longitude"])]
             except Exception as exc:
                 day.notes.append(f"{role} 无法确定搜索中心：{safe_error(exc)}")
-        if not points:
+        if not points and not (role == "food" and any(conflicting_activities(day, meal)
+                for meal in (meal_types or ("breakfast", "lunch", "dinner")))):
             day.notes.append(f"{role} 当天无可用景点坐标或明确城市中心，未执行全国范围替代搜索。")
             result[str(day.day_index)] = {} if role == "food" else []
             continue
-        first, last = points[0], points[-1]
-        middle = points[len(points) // 2]
+        first, last = (points[0], points[-1]) if points else (None, None)
+        middle = points[len(points) // 2] if points else None
         if len(points) > 1 and distance_m(*first, *middle) <= 10000:
             middle = ((first[0] + middle[0]) / 2, (first[1] + middle[1]) / 2)
         anchors = {"breakfast": first, "lunch": middle, "dinner": last} if role == "food" else {"hotel": last}
@@ -111,8 +162,11 @@ async def dynamic_candidates(plan, role, *, day_ids=None, meal_types=None, inclu
             if role == "food" and meal_types is not None and slot not in meal_types:
                 continue
             rows = []
+            if role == "food" and conflicting_activities(day, slot):
+                day_rows[slot] = await conflict_dining_candidates(plan, day, slot, internal_first=internal_first)
+                continue
             try:
-                for radius in (2000, 8000):
+                for radius in ((2000, 8000) if anchor else ()):
                     rows = await asyncio.to_thread(client.search_nearby, plan.destination,
                         "restaurant" if role == "food" else "hotel", *anchor, radius)
                     if rows:
@@ -144,6 +198,10 @@ class TravelCoordinator(BaseAgent):
         for role, schema, agent in [("activity", ActivityOutput, self.sub_agents[0]),
                                     ("food", FoodOutput, self.sub_agents[1]),
                                     ("hotel", HotelOutput, self.sub_agents[2])]:
+            if role == "food":
+                # Resolve optional activity times before conflict detection/retrieval.
+                for day in plan.days:
+                    schedule_day(day, arrange_meals=False)
             try:
                 if role == "activity":
                     rows = await asyncio.to_thread(client.search, request.destination, "tourist_attraction", " ".join(request.preferences.interests))
@@ -166,6 +224,29 @@ class TravelCoordinator(BaseAgent):
                 output = schema.model_validate_json(result) if isinstance(result, str) else schema.model_validate(result)
                 merge_recommendations(plan, role, output, candidates)
                 audit("specialist_completed", trip_id=plan.trip_id, role=role, output=output.model_dump(mode="json"))
+                if role == "food":
+                    # A specialist can reject verified internal options for dietary
+                    # preferences. Retry only those slots with external candidates.
+                    for day in plan.days:
+                        slots = {meal for meal, pool in candidates.get(str(day.day_index), {}).items()
+                            if getattr(day, meal) is None and any(r.get("dining_schedule", {}).get("containing_place_id") for r in pool)}
+                        if not slots:
+                            continue
+                        fallback = await dynamic_candidates(plan, "food", day_ids={day.day_id},
+                            meal_types=slots, internal_first=False)
+                        yield Event(author=self.name, actions=EventActions(state_delta={
+                            "current_plan": plan.model_dump_json(), "food_candidates": json.dumps(fallback, ensure_ascii=False),
+                            "food_result": None}))
+                        async for event in agent.run_async(ctx):
+                            yield event
+                        result = ctx.session.state.get("food_result")
+                        retry = FoodOutput.model_validate_json(result) if isinstance(result, str) else FoodOutput.model_validate(result)
+                        retry = FoodOutput(days=[FoodDay(day_index=day.day_index,
+                            **{slot: getattr(selection, slot) for slot in slots})
+                            for selection in retry.days if selection.day_index == day.day_index])
+                        merge_recommendations(plan, "food", retry, fallback)
+                        audit("food_external_fallback", trip_id=plan.trip_id, day_index=day.day_index,
+                            output=retry.model_dump(mode="json"))
             except Exception as exc:
                 audit("specialist_error", trip_id=plan.trip_id, role=role, error=safe_error(exc))
                 plan.days[0].notes.append(f"{role} 推荐未完成：{safe_error(exc)}；已保留其他结果。")
@@ -174,7 +255,8 @@ class TravelCoordinator(BaseAgent):
         plan = TripPlan.model_validate(plan.model_dump())
         audit("generation_completed", trip_id=plan.trip_id, destination=plan.destination,
             days=[{"date": str(d.date), "meals": {meal: getattr(d, meal).place_id if getattr(d, meal) else None
-                for meal in ("breakfast", "lunch", "dinner")}} for d in plan.days])
+                for meal in ("breakfast", "lunch", "dinner")}, "timeline_warnings": d.timeline_warnings,
+                "timeline": [t.model_dump(mode="json") for t in d.timeline]} for d in plan.days])
         yield Event(author=self.name, content=types.Content(role="model", parts=[types.Part(text=plan.model_dump_json())]),
             actions=EventActions(state_delta={"trip_plan": plan.model_dump(mode="json")}))
 
@@ -199,8 +281,7 @@ def merge_recommendations(plan, role, output, candidates):
                 pool = candidates.get(str(day.day_index), {}).get(meal, [])
                 row = next((r for r in pool if r["id"] == selected_id), None)
                 if row:
-                    setattr(day, meal, Restaurant(**place_fields(row), price_level=row.get("priceLevel"),
-                        opening_hours=opening_hours(row)))
+                    setattr(day, meal, restaurant_from_candidate(row, day, meal))
                 elif selected_id:
                     day.notes.append(f"{meal} 未通过地点存在性核实，保留空槽。")
         elif selection.day_index < plan.total_days:

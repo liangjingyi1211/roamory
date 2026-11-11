@@ -203,14 +203,15 @@ def test_timeline_migration_and_edits(tmp_path, monkeypatch):
     store.save(plan)
     original_second = store.get(plan.trip_id).days[1].model_dump()
     target = next(t for t in day.timeline if t.reference_id == day.activities[0].id)
-    updated = store.edit(plan.trip_id, day.day_id, "timeline", "time", item_id=target.id, start_time="12:10", end_time="12:50")
-    assert updated.days[0].activities[0].planned_start_time == time(12, 10)
+    # V8 keeps Museum at 11:00–14:00; explicitly overlap Park at 14:00–15:00.
+    updated = store.edit(plan.trip_id, day.day_id, "timeline", "time", item_id=target.id, start_time="14:10", end_time="14:50")
+    assert updated.days[0].activities[0].planned_start_time == time(14, 10)
     assert any("时间重叠" in message for message in updated.days[0].timeline_warnings)
     with pytest.raises(ValueError):
         store.edit(plan.trip_id, day.day_id, "timeline", "time", item_id=target.id, start_time="14:00", end_time="13:00")
-    assert store.get(plan.trip_id).days[0].activities[0].planned_start_time == time(12, 10)
+    assert store.get(plan.trip_id).days[0].activities[0].planned_start_time == time(14, 10)
     updated = store.edit(plan.trip_id, day.day_id, "activities", "save", item_id=day.activities[0].id, name="Manual replacement")
-    assert updated.days[0].activities[0].planned_start_time == time(12, 10)
+    assert updated.days[0].activities[0].planned_start_time == time(14, 10)
     deleted_id = updated.days[0].activities[0].id
     updated = store.edit(plan.trip_id, day.day_id, "activities", "delete", item_id=deleted_id)
     assert deleted_id not in [t.reference_id for t in updated.days[0].timeline]

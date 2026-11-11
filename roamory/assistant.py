@@ -16,7 +16,7 @@ from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from .models import Model, Activity, Restaurant, Hotel
 from .agent import (MODEL, activity_agent, food_agent, hotel_agent, dynamic_candidates,
-                    ActivityOutput, FoodOutput, HotelOutput, safe_error)
+                    ActivityOutput, FoodOutput, HotelOutput, safe_error, restaurant_from_candidate)
 from .places import client as places, place_fields, opening_hours
 from .storage import VersionConflict
 from .audit import audit
@@ -244,6 +244,23 @@ async def recommend(plan, day, role, intent):
         return Hotel(**place_fields(row), rating=row.get("rating"))
     meals = {}
     slots = ("breakfast", "lunch", "dinner") if intent.action == "replan" else (intent.meal_type,)
+    rejected_internal = {slot for slot in slots if getattr(selection, slot) is None
+        and any(r.get("dining_schedule", {}).get("containing_place_id")
+            for r in candidates.get(str(day.day_index), {}).get(slot, []))}
+    if rejected_internal:
+        fallback = await dynamic_candidates(plan, "food", day_ids={day.day_id},
+            meal_types=rejected_internal, include_last_hotel=True, internal_first=False)
+        if intent.action == "replace":
+            for slot in rejected_internal:
+                old = getattr(day, slot)
+                pool = fallback.get(str(day.day_index), {}).get(slot, [])
+                fallback[str(day.day_index)][slot] = [r for r in pool if not old or r["id"] != old.place_id]
+        retry = await run_specialist(role, plan, day, fallback, intent)
+        if len(retry.days) != 1 or retry.days[0].day_index != day.day_index:
+            raise ValueError("专家未返回唯一授权日期，未保存任何修改")
+        for slot in rejected_internal:
+            setattr(selection, slot, getattr(retry.days[0], slot))
+            candidates[str(day.day_index)][slot] = fallback.get(str(day.day_index), {}).get(slot, [])
     for slot in slots:
         rows = candidates.get(str(day.day_index), {}).get(slot, [])
         selected_id = getattr(selection, slot)
@@ -251,7 +268,7 @@ async def recommend(plan, day, role, intent):
         if selected_id and row is None:
             raise ValueError("餐厅不属于授权槽位的真实候选，原安排保留")
         if row:
-            meals[slot] = Restaurant(**place_fields(row), price_level=row.get("priceLevel"), opening_hours=opening_hours(row))
+            meals[slot] = restaurant_from_candidate(row, day, slot)
         else:
             meals[slot] = getattr(day, slot)
     if all(meals[slot] == getattr(day, slot) for slot in slots):
@@ -281,7 +298,7 @@ async def build_patch(plan, intent, day, old):
     target = working.days[day.day_index - 1]
     target.activities = await recommend(working, target, "activity", intent)
     from .timeline import schedule_day
-    schedule_day(target)
+    schedule_day(target, arrange_meals=False)
     meals = await recommend(working, target, "food", intent)
     for slot, value in meals.items():
         setattr(target, slot, value)
