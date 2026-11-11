@@ -1,5 +1,6 @@
 """Local single-user SQLite persistence and atomic, model-free edits."""
 import sqlite3
+from copy import deepcopy
 from datetime import time
 from .models import TripPlan, Restaurant, Activity, Hotel
 from .timeline import migrate_plan, sync_day
@@ -26,17 +27,20 @@ class TripStore:
     def connect(self):
         return sqlite3.connect(self.path, timeout=10)
 
-    def save(self, plan: TripPlan):
+    def save(self, plan: TripPlan, *, expected_version=None):
         plan = migrate_plan(TripPlan.model_validate(plan.model_dump()))
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT version FROM trips WHERE id=?", (plan.trip_id,)).fetchone()
+            if expected_version is not None and (row is None or row[0] != expected_version):
+                raise VersionConflict("行程不存在或已被修改，请刷新后重新提交")
             if row and row[0] != plan.version:
                 raise VersionConflict("行程已被修改，请刷新后重新提交")
             if row:
                 plan.version += 1
             db.execute("INSERT INTO trips(id,payload,version) VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload,version=excluded.version,updated=CURRENT_TIMESTAMP",
                 (plan.trip_id, plan.model_dump_json(), plan.version))
+        return plan
 
     def get(self, trip_id: str) -> TripPlan:
         with self.connect() as db:
@@ -121,7 +125,14 @@ class TripStore:
         return plan
 
     def apply_scoped_patch(self, base, day_id, changes, *, reschedule=False):
-        """Only whitelisted day fields, optimistic lock, one atomic write."""
+        """Compatibility wrapper: one in-memory patch, one atomic write."""
+        plan = self.apply_patch_in_memory(base, day_id, changes, reschedule=reschedule)
+        self.save(plan)
+        return self.get(plan.trip_id)
+
+    @staticmethod
+    def apply_patch_in_memory(base, day_id, changes, *, reschedule=False):
+        """Apply a scoped patch to an isolated copy without database access."""
         if not changes or set(changes) - {"breakfast", "lunch", "dinner", "activities", "hotel"}:
             raise ValueError("局部补丁包含越界字段")
         plan = base.model_copy(deep=True)
@@ -129,7 +140,7 @@ class TripStore:
         if day is None:
             raise ValueError("日期不存在")
         for field, value in changes.items():
-            setattr(day, field, value)
+            setattr(day, field, deepcopy(value))
         if reschedule:
             from .timeline import schedule_day
             schedule_day(day)
@@ -151,9 +162,8 @@ class TripStore:
             schedule_meals(day, [slot for slot in changes if slot in {"breakfast", "lunch", "dinner"}
                 and getattr(day, slot) and getattr(day, slot).place_id])
         plan = TripPlan.model_validate(plan.model_dump())
-        # Version check occurs inside save's write transaction, after all remote work.
-        self.save(plan)
-        return self.get(plan.trip_id)
+        # Detach patch values too: callers may reuse mutable model instances.
+        return plan.model_copy(deep=True)
 
 class VersionConflict(ValueError):
     pass

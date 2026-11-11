@@ -31,9 +31,8 @@ def test_intent_contract_and_resolution(saved, monkeypatch):
     with pytest.raises(ValueError):
         ai.EditRequest(status="ready", intents=[])
     with pytest.raises(ValueError):
-        ai.EditRequest(status="ready", intents=[{"action": "add", "target": "activity"}] * 2)
+        ai.EditRequest(status="ready", intents=[{"action": "add", "target": "activity"}] * 6)
     for data in [dict(action="replace", target="meal", day_index=2, day_id=plan.days[0].day_id, meal_type="lunch"),
-                 dict(action="add", target="meal", day_index=2, meal_type="lunch"),
                  dict(action="replace", target="activity", day_index=2, target_id="forged"),
                  dict(action="replace", target="meal", day_index=2, meal_type="lunch", selection_mode="named", new_place_name="invented")]:
         with pytest.raises(ai.Clarification):

@@ -1,4 +1,4 @@
-"""V4 local edit pipeline: parse -> resolve -> one scope -> patch -> CAS save.
+"""V9 local edits: parse -> preflight -> ordered in-memory patches -> one CAS save.
 
 No full-trip generation call is permitted here. Manual CRUD never imports this
 pipeline. Agent outputs are candidate selections, never writable TripPlans.
@@ -9,16 +9,16 @@ import re
 import time
 import uuid
 from typing import Literal
-from pydantic import Field, model_validator
-from google import genai
+from pydantic import Field, ValidationError, model_validator
 from google.genai import types
+from google.adk.models.llm_request import LlmRequest
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
-from .models import Model, Activity, Restaurant, Hotel
-from .agent import (MODEL, activity_agent, food_agent, hotel_agent, dynamic_candidates,
-                    ActivityOutput, FoodOutput, HotelOutput, safe_error, restaurant_from_candidate)
+from .models import Model, Activity, Restaurant, Hotel, TripPlan
+from .agent import (get_llm, safe_error, activity_agent, food_agent, hotel_agent, dynamic_candidates,
+                    ActivityOutput, FoodOutput, HotelOutput, restaurant_from_candidate)
 from .places import client as places, place_fields, opening_hours
-from .storage import VersionConflict
+from .storage import VersionConflict, TripStore
 from .audit import audit
 
 class EditIntent(Model):
@@ -35,13 +35,15 @@ class EditIntent(Model):
 
 class EditRequest(Model):
     status: Literal["ready", "needs_clarification", "not_supported"]
-    intents: list[EditIntent] = Field(default_factory=list, max_length=1)
+    intents: list[EditIntent] = Field(default_factory=list, max_length=5)
     message: str | None = None
 
     @model_validator(mode="after")
     def valid_status(self):
-        if (self.status == "ready") != (len(self.intents) == 1):
-            raise ValueError("ready 必须恰好有一个操作，其他状态不得含操作")
+        if self.status == "ready" and not 1 <= len(self.intents) <= 5:
+            raise ValueError("ready 必须包含 1–5 个操作")
+        if self.status != "ready" and self.intents:
+            raise ValueError("其他状态不得含操作")
         return self
 
 class EditResponse(Model):
@@ -49,13 +51,34 @@ class EditResponse(Model):
     message: str
     summary: dict = Field(default_factory=dict)
     updated_day_id: str | None = None
+    updated_day_ids: list[str] = Field(default_factory=list)
     version: int | None = None
 
 PARSER_INSTRUCTION = """Parse a Roamory LOCAL edit request. Output only the schema.
-Only ONE action per message: replace (existing nonempty slot/item), add (one activity
-or an empty meal/hotel), replan (one explicitly specified day or category on that day).
-Deletion, time edits, questions, whole-trip regeneration, and multiple operations
+Infer the intended changes from the WHOLE message, current trip state and page
+selection, not from verbs such as 换/加/重新规划. In context.days, null meal/hotel
+means an EMPTY slot; an object means OCCUPIED and gives the existing ID/name.
+For assigning one meal/hotel, choose add if empty and replace if occupied,
+regardless of the verb. Activities allow add (one new item) or replace (one existing
+item); replan means rebuilding an explicitly requested day or category, not merely
+selecting a different restaurant for one meal.
+Split actual independent changes into 1–5 ordered intents, preserving user order.
+Search/discovery wording and cuisines, reputation or locality constrain the associated
+edit via preferences; they are NOT extra edits. Preserve the user's final desired
+cuisine and relevant search constraints. Search without an identifiable edit target
+does not authorize adding items: ask for clarification or return not_supported.
+If the user identifies an OLD place, resolve it against the specified day's stored
+objects; if absent or inconsistent, needs_clarification, never turn it into an add
+or a new_place_name. target_id/target_name identify OLD objects, new_place_name the
+explicitly requested NEW place; do not populate old references for a generic slot edit.
+Deletion, time edits, questions, whole-trip regeneration
 are not_supported; intents=[] and explain in Chinese. Ambiguity is needs_clarification.
+More than five operations: not_supported, intents=[], ask to split the request;
+NEVER truncate or omit an operation. Separate different meals into different intents.
+Each intent must identify its own day and target. Repeated edits of the same slot,
+or a whole-day replan combined with another edit on that day, need clarification.
+References to results of preceding operations are not supported: request clarification
+instead of binding a pronoun to an old stored object. Never invent object IDs.
 Use explicit dates/day numbers first, otherwise selected_day_id for local replace/add.
 Replan needs explicit day (including 今天/这一天 referring to selected day), never
 infer a whole day replan from an unscoped '重做一下'. Select object IDs ONLY from stored
@@ -81,16 +104,32 @@ async def parse_edit(message, plan, selected_day_id=None, selected_place_ref=Non
     context = compact_context(plan, selected_day_id, selected_place_ref, history)
     if len(json.dumps(context, ensure_ascii=False)) > 120000:
         raise Clarification("当前行程过大，暂不支持聊天修改；请使用卡片手动编辑。")
-    ai = genai.Client()
+    request = LlmRequest(contents=[types.Content(role="user", parts=[types.Part(
+        text=json.dumps({"message": message, "context": context}, ensure_ascii=False))])],
+        config=types.GenerateContentConfig(system_instruction=PARSER_INSTRUCTION +
+            '\nExample JSON response when clarification is needed: '
+            '{"status":"needs_clarification","intents":[],"message":"请明确日期和目标。"}',
+            response_mime_type="application/json", response_schema=EditRequest,
+            temperature=0, max_output_tokens=4800))
+
+    async def execute():
+        parts = []
+        async for response in get_llm().generate_content_async(request):
+            if response.content:
+                parts.extend(p.text for p in response.content.parts or [] if p.text and not p.thought)
+        return "".join(parts)
+
     try:
-        result = await asyncio.wait_for(ai.aio.models.generate_content(model=MODEL,
-            contents=json.dumps({"message": message, "context": context}, ensure_ascii=False),
-            config=types.GenerateContentConfig(system_instruction=PARSER_INSTRUCTION,
-                response_mime_type="application/json", response_json_schema=EditRequest.model_json_schema(),
-                temperature=0, max_output_tokens=2400)), timeout=40)
-        return EditRequest.model_validate_json(result.text)
-    finally:
-        await ai.aio.aclose()
+        text = await asyncio.wait_for(execute(), timeout=40)
+        try:
+            return EditRequest.model_validate_json(text)
+        except ValidationError as exc:
+            if any(e["type"] == "too_long" and e["loc"] == ("intents",) for e in exc.errors()):
+                return EditRequest(status="not_supported", message="一次最多支持 5 项修改，请拆分后发送；未保存任何修改。")
+            raise ValueError("解析结果格式无效，请明确日期和操作后重试") from exc
+    except Exception as exc:
+        audit_edit("assistant_parse_failed", trip_id=plan.trip_id, error=safe_error(exc))
+        raise
 
 class Clarification(ValueError):
     pass
@@ -145,14 +184,17 @@ def resolve_intent(plan, intent, message, selected_day_id=None, selected_place_r
         old = day.hotel
     if intent.target != "activity" and intent.target_name and (old is None or old.name != intent.target_name):
         raise Clarification("目标名称与指定槽位不一致。")
-    if intent.target == "activity" and intent.action == "add" and intent.target_id:
-        raise Clarification("新增景点不能携带替换目标 ID。")
+    if intent.target == "activity" and intent.action == "add" and (intent.target_id or intent.target_name):
+        raise Clarification("新增景点不能携带旧地点引用，请明确要增加还是替换。")
     if intent.target_id and intent.target != "activity" and (not old or old.id != intent.target_id):
         raise Clarification("目标 ID 不属于指定槽位。")
-    if intent.action == "replace" and old is None:
-        raise Clarification("这个槽位目前为空，请使用“增加”而不是“替换”。")
-    if intent.action == "add" and intent.target in {"meal", "hotel"} and old is not None:
-        raise Clarification("这个槽位已有安排，请使用“更换”。")
+    # A resolved singleton slot expresses the same desired assignment for add and
+    # replace. Correct occasional model mistakes only AFTER checking old references.
+    # Activity lists and replans must retain their distinct operation semantics.
+    if intent.action in {"add", "replace"} and intent.target in {"meal", "hotel"}:
+        intent.action = "replace" if old is not None else "add"
+    elif intent.action == "replace" and old is None:
+        raise Clarification("无法确定要替换的旧地点，请明确目标。")
     if intent.action == "replan" and intent.selection_mode == "named":
         raise Clarification("指定地点名称请使用增加或替换；重新规划使用真实候选推荐。")
     if intent.selection_mode == "named":
@@ -305,6 +347,120 @@ async def build_patch(plan, intent, day, old):
     hotel = None if day.day_index == plan.total_days else await recommend(working, target, "hotel", intent)
     return {"activities": target.activities, **meals, "hotel": hotel}
 
+def allowed_fields(intent):
+    if intent.target == "day":
+        return {"breakfast", "lunch", "dinner", "activities", "hotel"}
+    if intent.target == "meal":
+        return {"breakfast", "lunch", "dinner"} if intent.action == "replan" else {intent.meal_type}
+    return {"activities"} if intent.target == "activity" else {"hotel"}
+
+
+def audit_edit(event, **fields):
+    """Diagnostic logging must not turn an already committed batch into a failure."""
+    try:
+        audit(event, **fields)
+    except OSError:
+        pass
+
+
+def validate_patch_scope(intent, day, old, changes):
+    if not isinstance(changes, dict) or set(changes) - allowed_fields(intent):
+        raise ValueError("补丁超出授权范围")
+    if intent.target != "activity" or intent.action == "replan":
+        return
+    items = changes.get("activities", [])
+    if intent.action == "add":
+        if len(items) != len(day.activities) + 1 or items[:-1] != day.activities:
+            raise ValueError("增加景点不能修改已有景点")
+    else:
+        if len(items) != len(day.activities) or any(
+            item.id != prior.id or (prior.id != old.id and item != prior)
+            for item, prior in zip(items, day.activities)
+        ):
+            raise ValueError("替换景点不能修改其他景点")
+
+
+def validate_batch_conflicts(plan, intents, message, selected_day_id, selected_place_ref):
+    """Resolve stored targets before remote work; reject overlapping writes."""
+    scopes = []
+    for index, intent in enumerate(intents, 1):
+        try:
+            resolved, day, old = resolve_intent(plan, intent, message, selected_day_id, selected_place_ref)
+            fields = allowed_fields(resolved)
+            for previous, other, other_fields, other_old in scopes:
+                if other.day_id != resolved.day_id or not fields.intersection(other_fields):
+                    continue
+                distinct_items = (resolved.target == other.target == "activity"
+                    and resolved.action == other.action == "replace"
+                    and old is not None and other_old is not None and old.id != other_old.id)
+                if not distinct_items:
+                    raise Clarification(f"与第 {previous} 项修改范围重叠，请拆分请求或明确优先级")
+            scopes.append((index, resolved, fields, old))
+        except Clarification as exc:
+            raise Clarification(f"第 {index} 项：{exc}") from exc
+    return [resolved for _, resolved, _, _ in scopes]
+
+
+async def execute_edit_batch(store, base, request, message, selected_day_id=None, selected_place_ref=None):
+    """Build ordered patches in isolation; persist only after all checks pass."""
+    request = EditRequest.model_validate(request.model_dump())
+    if request.status != "ready":
+        raise Clarification("请求尚未明确，不能执行修改")
+    intents = validate_batch_conflicts(base, request.intents, message, selected_day_id, selected_place_ref)
+    working = base.model_copy(deep=True)
+    results, authorized = [], {}
+    request_id = str(uuid.uuid4())
+    for index, intent in enumerate(intents, 1):
+        started = time.monotonic()
+        try:
+            intent, day, old = resolve_intent(working, intent, message, selected_day_id, selected_place_ref)
+            # Retrieval/builders cannot mutate the authoritative working snapshot.
+            patch_plan = working.model_copy(deep=True)
+            changes = await asyncio.wait_for(build_patch(patch_plan, intent,
+                patch_plan.days[day.day_index - 1], old.model_copy(deep=True) if old else None), timeout=150)
+            fields = allowed_fields(intent)
+            validate_patch_scope(intent, day, old, changes)
+            changes = {s: value for s, value in changes.items() if value != getattr(day, s)}
+            if not changes:
+                raise ValueError("没有可提交的新推荐")
+            working = TripStore.apply_patch_in_memory(working, day.day_id, changes,
+                reschedule=intent.action == "replan" and intent.target == "day")
+            authorized.setdefault(day.day_id, set()).update(fields)
+            results.append({"index": index, "action": intent.action, "day_index": day.day_index,
+                "day_id": day.day_id, "fields": list(changes),
+                "names": {s: [p.name for p in v] if isinstance(v, list) else v.name if v else None
+                    for s, v in changes.items()}})
+            audit_edit("batch_operation_completed", request_id=request_id, operation=index,
+                action=intent.action, day_id=day.day_id, fields=list(changes),
+                elapsed_ms=round((time.monotonic() - started) * 1000))
+        except Exception as exc:
+            audit_edit("batch_operation_failed", request_id=request_id, operation=index,
+                action=intent.action, day_id=intent.day_id, error_type=type(exc).__name__)
+            if isinstance(exc, Clarification):
+                raise Clarification(f"第 {index} 项：{exc}") from exc
+            reason = "输出数据结构无效" if isinstance(exc, ValidationError) else (
+                str(exc) if isinstance(exc, ValueError) else "服务调用失败或超时，请稍后重试")
+            raise ValueError(f"第 {index} 项：{reason}") from exc
+    # Business changes must be inside the union of authorized fields/days.
+    before, after = base.model_dump(), working.model_dump()
+    if {k: v for k, v in before.items() if k != "days"} != {k: v for k, v in after.items() if k != "days"}:
+        raise ValueError("批量修改超出行程范围")
+    from .timeline import check_conflicts
+    for old_day, new_day in zip(base.days, working.days, strict=True):
+        permitted = authorized.get(old_day.day_id, set())
+        derived = {"timeline", "timeline_warnings"} if permitted else set()
+        if any(value != new_day.model_dump()[key] for key, value in old_day.model_dump().items()
+               if key not in permitted | derived):
+            raise ValueError("批量修改包含未授权字段")
+        existing = set(check_conflicts(old_day))
+        if any(w not in existing and "时间待安排" not in w for w in check_conflicts(new_day)):
+            operation = next(r["index"] for r in reversed(results) if r["day_id"] == old_day.day_id)
+            raise ValueError(f"第 {operation} 项所在日期出现新的时间冲突，请调整安排")
+    working = TripPlan.model_validate(working.model_dump())
+    working = store.save(working, expected_version=base.version)
+    return working, results
+
+
 _last_request = {}
 
 async def assistant_edit(store, trip_id, message, *, selected_day_id=None, selected_place_ref=None,
@@ -328,35 +484,29 @@ async def assistant_edit(store, trip_id, message, *, selected_day_id=None, selec
             raise Clarification("选中日期不属于当前行程。")
         request = await parse_edit(message, plan, selected_day_id, selected_place_ref, history)
         if request.status != "ready":
-            return EditResponse(status=request.status, message=request.message or "请明确一个日期和一个修改目标。", version=plan.version)
-        intent, day, old = resolve_intent(plan, request.intents[0], message, selected_day_id, selected_place_ref)
-        changes = await asyncio.wait_for(build_patch(plan, intent, day, old), timeout=150)
-        allowed = {"breakfast", "lunch", "dinner", "activities", "hotel"} if intent.target == "day" else (
-            {"breakfast", "lunch", "dinner"} if intent.target == "meal" and intent.action == "replan" else
-            {intent.meal_type} if intent.target == "meal" else {"activities"} if intent.target == "activity" else {"hotel"})
-        if set(changes) - allowed:
-            raise ValueError("补丁超出授权范围")
-        unchanged = [s for s, value in changes.items() if value == getattr(day, s)]
-        changes = {s: value for s, value in changes.items() if s not in unchanged}
-        if not changes:
-            raise ValueError("没有可提交的新推荐，原安排保留")
-        updated = store.apply_scoped_patch(plan, day.day_id, changes,
-            reschedule=intent.action == "replan" and intent.target == "day")
+            return EditResponse(status=request.status,
+                message="未保存任何修改：" + (request.message or "请明确每项修改的日期和目标。"), version=plan.version)
+        updated, operations = await execute_edit_batch(store, plan, request, message,
+            selected_day_id, selected_place_ref)
         labels = {"breakfast": "早餐", "lunch": "午餐", "dinner": "晚餐", "activities": "景点", "hotel": "酒店"}
-        warnings = updated.days[day.day_index - 1].timeline_warnings
-        summary = {"action": intent.action, "day_index": day.day_index, "fields": list(changes),
-            "names": {s: [p.name for p in v] if isinstance(v, list) else v.name if v else None for s, v in changes.items()}}
-        descriptions = [f"{labels[s]} → " + ("、".join(p.name for p in value) if isinstance(value, list) else value.name if value else "未安排")
-            for s, value in changes.items()]
-        message = f"已更新 Day {day.day_index}：" + "；".join(descriptions)[:700] + "。"
-        if unchanged:
-            message += "未获得新候选的" + "、".join(labels[s] for s in unchanged) + "已保留原安排。"
-        message += "当前日期内仍有时间待安排或冲突，请查看提示。" if warnings else ""
-        audit("assistant_edit_completed", trip_id=trip_id, version=updated.version, summary=summary)
-        return EditResponse(status="success", message=message, summary=summary, updated_day_id=day.day_id, version=updated.version)
+        day_ids = list(dict.fromkeys(op["day_id"] for op in operations))
+        summary = {**operations[0], "operations": operations} if len(operations) == 1 else {"operations": operations}
+        descriptions = []
+        for op in operations:
+            names = [f"{labels[s]} → " + ("、".join(v) if isinstance(v, list) else v or "未安排")
+                for s, v in op["names"].items()]
+            descriptions.append(f"第 {op['index']} 项 · Day {op['day_index']}：" + "；".join(names))
+        message = f"已一次保存 {len(operations)} 项修改：\n" + "\n".join(descriptions)
+        if any(d.timeline_warnings for d in updated.days if d.day_id in day_ids):
+            message += "\n部分时间仍待安排或存在原有提示，请查看时间线。"
+        audit_edit("assistant_edit_completed", trip_id=trip_id, version=updated.version, operation_count=len(operations))
+        return EditResponse(status="success", message=message, summary=summary,
+            updated_day_id=day_ids[0], updated_day_ids=day_ids, version=updated.version)
     except Clarification as exc:
-        return EditResponse(status="needs_clarification", message=str(exc))
+        return EditResponse(status="needs_clarification", message="未保存任何修改：" + str(exc))
     except VersionConflict as exc:
-        return EditResponse(status="conflict", message=str(exc))
+        return EditResponse(status="conflict", message="未保存任何修改：" + str(exc))
     except (Exception, asyncio.TimeoutError) as exc:
-        return EditResponse(status="failed", message="未保存修改：" + safe_error(exc))
+        reason = "输出数据结构无效" if isinstance(exc, ValidationError) else (
+            str(exc) if isinstance(exc, ValueError) else "服务调用失败，请稍后重试")
+        return EditResponse(status="failed", message="未保存任何修改：" + reason)

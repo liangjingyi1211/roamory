@@ -9,6 +9,8 @@ dependencies = [
   "python-dotenv>=1,<2",
   "pydantic>=2,<3",
   "pillow>=10,<14",
+  "openai>=3.49.0",
+  "litellm>=1.84",
 ]
 [dependency-groups]
 dev = ["pytest>=8,<10"]
